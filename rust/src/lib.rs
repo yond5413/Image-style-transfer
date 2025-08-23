@@ -1,2 +1,2 @@
-mod infer;
-mod image_ops;
+pub mod infer;
+pub mod image_ops;

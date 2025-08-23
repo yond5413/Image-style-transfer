@@ -972,6 +972,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.2.16",
  "image",
+ "thiserror 1.0.69",
  "wasm-bindgen",
  "wgpu 0.19.4",
  "wonnx",
