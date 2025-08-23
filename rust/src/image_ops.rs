@@ -1,10 +1,12 @@
-use image::{imageops::FilterType};
+use image::{imageops::FilterType, DynamicImage, ImageBuffer, Rgba};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ImageError {
     #[error("Failed to decode image")]
     Decode(#[from] image::ImageError),
+    #[error("Image processing failed: {0}")]
+    Processing(String),
 }
 
 /// Preprocesses an image for the style transfer model.
@@ -64,4 +66,55 @@ pub fn preprocess_image(
     tensor.extend_from_slice(&b_channel);
 
     Ok(tensor)
+}
+
+pub fn postprocess_image(
+    output_tensor: Vec<f32>,
+    original_image_bytes: &[u8],
+    width: u32,
+    height: u32,
+    strength: f32,
+) -> Result<Vec<u8>, ImageError> {
+    let stylized_img = tensor_to_image(output_tensor, width, height)?;
+    let original_img = image::load_from_memory(original_image_bytes)?;
+
+    let mut output_img = ImageBuffer::new(width, height);
+
+    for (x, y, stylized_pixel) in stylized_img.enumerate_pixels() {
+        let original_pixel = original_img.get_pixel(x, y);
+        let blended_pixel = blend_pixels(original_pixel, *stylized_pixel, strength);
+        output_img.put_pixel(x, y, blended_pixel);
+    }
+
+    Ok(output_img.into_raw())
+}
+
+fn tensor_to_image(
+    tensor: Vec<f32>,
+    width: u32,
+    height: u32,
+) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, ImageError> {
+    let mut img_buf = ImageBuffer::new(width, height);
+
+    for y in 0..height {
+        for x in 0..width {
+            let r = (tensor[(y * width + x) as usize] * 255.0).max(0.0).min(255.0) as u8;
+            let g = (tensor[((height * width) + y * width + x) as usize] * 255.0)
+                .max(0.0)
+                .min(255.0) as u8;
+            let b = (tensor[((2 * height * width) + y * width + x) as usize] * 255.0)
+                .max(0.0)
+                .min(255.0) as u8;
+            img_buf.put_pixel(x, y, Rgba([r, g, b, 255]));
+        }
+    }
+
+    Ok(img_buf)
+}
+
+fn blend_pixels(original: Rgba<u8>, stylized: Rgba<u8>, strength: f32) -> Rgba<u8> {
+    let r = (original[0] as f32 * (1.0 - strength) + stylized[0] as f32 * strength) as u8;
+    let g = (original[1] as f32 * (1.0 - strength) + stylized[1] as f32 * strength) as u8;
+    let b = (original[2] as f32 * (1.0 - strength) + stylized[2] as f32 * strength) as u8;
+    Rgba([r, g, b, 255])
 }

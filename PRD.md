@@ -84,25 +84,19 @@ A privacy-first, entirely in-browser image style transfer web app. Users upload 
 
 **High-level:**
 
-* **UI**: Minimal TypeScript + Web Components or a light framework (e.g., Preact/React). Interop with WASM via `wasm-bindgen`.
-* **Inference Core (Rust→WASM)**:
-
-  * **Option A (Preferred)**: Rust **wonnx** (WebGPU ONNX) for inference entirely in Rust targeting WebGPU via `wgpu`.
-  * **Option B**: Hybrid—Rust for image I/O & post-processing; call `onnxruntime-web` (WebGPU backend) from TypeScript. (Keeps JS dependency; not pure Rust pipeline.)
-* **Image Processing**: Rust `image` crate for resize/normalize; wasm-bindgen
-  bindings to pass `ImageData`/`Uint8Array`.
-* **Model Registry**: Static JSON manifest with model metadata (name, file path, tensor names, input size, recommended resolution, hash, size).
-* **Storage & Caching**: Service Worker (Workbox or custom) caches `index.html`, WASM, JS bundles, CSS, and model binaries on demand; IndexedDB for model byte caching if needed.
-* **Webcam**: `MediaDevices.getUserMedia` for frames → WebGPU pipeline; backpressure to keep latency low.
+*   **UI (Controller)**: A TypeScript-based React application responsible for state management, user interaction, and orchestrating the overall application flow.
+*   **Inference Engine (JS)**: Uses the `onnxruntime-web` library to load and execute style transfer models. It leverages the WebGPU backend for high-performance, in-browser inference.
+*   **Image Processing Worker (Rust→WASM)**: A headless Rust library compiled to WebAssembly. It exposes a minimal set of high-performance functions for CPU-bound image manipulation tasks (pre- and post-processing).
+*   **Model Registry**: A static JSON manifest (`public/models/manifest.json`) that provides metadata for each available style transfer model.
+*   **Storage & Caching**: A Service Worker caches the application shell (HTML, JS, CSS, WASM) and model files on demand, enabling offline functionality.
 
 **Data Flow:**
 
-1. User selects style → fetch model (if not cached) → instantiate runtime.
-2. Preprocess uploaded image to model resolution (e.g., 256–512 square): resize, normalize, CHW/NCHW.
-3. Run inference on GPU; receive stylized tensor.
-4. Postprocess to RGBA `ImageData`.
-5. Apply **Style Strength**: `out = lerp(original, stylized, alpha)`.
-6. Render canvas; enable PNG export.
+1.  **Load**: The user uploads an image. The JS Controller reads it into an `ArrayBuffer`.
+2.  **Pre-process (JS → WASM)**: The `ArrayBuffer` is passed to the Rust/WASM worker. This is a zero-copy operation. The Rust code decodes, resizes, and normalizes the image into a `Float32Array` tensor.
+3.  **Inference (JS)**: The tensor is returned to the JS Controller, which feeds it into the `onnxruntime-web` inference session running on WebGPU.
+4.  **Post-process (JS → WASM)**: The output tensor from the model is passed back to the Rust/WASM worker, along with the original image data for blending.
+5.  **Render (JS)**: The final, stylized RGBA pixel data is returned to the JS Controller as a `Uint8Array` and rendered to a `<canvas>`.
 
 ---
 
@@ -150,88 +144,91 @@ A privacy-first, entirely in-browser image style transfer web app. Users upload 
 
 **Constraints & Conventions**
 
-* Prefer single-input/single-output feed-forward style transfer models (Johnson et al.).
-* Use FP16 where possible; fall back to FP32 if device lacks support.
-* Keep tensor names consistent across models to reduce glue logic.
+*   Prefer single-input/single-output feed-forward style transfer models (Johnson et al.).
+*   Use FP16 where possible; fall back to FP32 if device lacks support.
+*   Keep tensor names consistent across models to reduce glue logic.
 
 ---
 
 ## 9) UX / UI
 
-* **Layout**: Header (title + offline badge); main two-column (Original | Stylized) on desktop; stacked with toggle on mobile.
-* **Controls**:
-
-  * File upload button + drag‑drop zone
-  * Style dropdown (or card grid with preview thumbnails)
-  * **Style Strength** slider (0–100%)
-  * Actions: **Download PNG**, **Reset**, **Webcam** (bonus)
-* **Status**: Model loading spinner with size; GPU backend name; offline indicator.
-* **Errors**: Friendly copy with detection for unsupported WebGPU; suggest enabling experimental flags or updating browser.
+*   **Layout**: Header (title + offline badge); main two-column (Original | Stylized) on desktop; stacked with toggle on mobile.
+*   **Controls**:
+    *   File upload button + drag‑drop zone
+    *   Style dropdown (or card grid with preview thumbnails)
+    *   **Style Strength** slider (0–100%)
+    *   Actions: **Download PNG**, **Reset**, **Webcam** (bonus)
+*   **Status**: Model loading spinner with size; GPU backend name; offline indicator.
+*   **Errors**: Friendly copy with detection for unsupported WebGPU; suggest enabling experimental flags or updating browser.
 
 ---
 
 ## 10) Technical Design (Rust + WASM + WebGPU)
 
+**Core JavaScript Libraries**
+
+*   `onnxruntime-web`: For ONNX model inference using the WebGPU backend.
+*   `react`, `react-dom`: For building the user interface.
+*   `tailwindcss`: For styling.
+
 **Rust Crates**
 
-* `wonnx` (ONNX inference on wgpu / WebGPU)
-* `wgpu` (WebGPU abstraction)
-* `wasm-bindgen`, `js-sys`, `web-sys` (interop)
-* `image` (decode/resize/color ops) or `fast_image_resize`
-* `console_error_panic_hook`, `wasm-logger` (dev tooling)
+*   `wasm-bindgen`, `js-sys`, `web-sys`: For JS ↔ WASM interop.
+*   `image`: For decoding, resizing, and color operations.
+*   `console_error_panic_hook`: For improved debugging.
 
 **Build Tooling**
 
-* `wasm-bindgen` + `wasm-pack` or `cargo-component` (if using WASI components)
-* Bundler: Vite/ESBuild (TypeScript UI)
+*   `wasm-pack`: For building the Rust/WASM worker module.
+*   `next.js` (or Vite): For bundling the TypeScript/React UI.
 
 **Key Routines**
 
-* **Init**: Detect WebGPU; request adapter/device; init `wonnx::Session` with selected ONNX.
-* **Preprocess**: `resize → to RGB → normalize (mean/std) → HWC→CHW → Float32/Float16`. Use GPU for resize (optional v1.1) to reduce CPU usage.
-* **Inference**: Bind input buffer; dispatch compute; readback output.
-* **Postprocess**: Convert tensor to `ImageData`; apply linear blend with original per pixel.
-* **PNG Export**: Canvas `toBlob` or Rust PNG encoder writing to `Uint8Array` and `URL.createObjectURL`.
+*   **Init**: The JS Controller detects WebGPU support and initializes the `onnxruntime-web` inference session with the selected ONNX model.
+*   **Preprocess (WASM)**: A Rust function (`preprocess_image`) is called from JS with the raw image bytes. It decodes, resizes, normalizes, and converts the image to a `Float32Array` tensor.
+*   **Inference (JS)**: The JS Controller runs the model on the GPU via `onnxruntime-web`.
+*   **Postprocess (WASM)**: A Rust function (`postprocess_image`) is called from JS with the output tensor and original image data. It performs a linear blend based on style strength and returns the final RGBA pixel data.
+*   **Render (JS)**: The JS Controller renders the final pixel data to a `<canvas>`.
 
 **Webcam Mode**
 
-* Use `requestVideoFrameCallback` (where available) for cadence.
-* Downscale frames to model resolution; keep a circular buffer for frame pacing.
-* Dynamically adjust resolution to maintain target FPS (adaptive quality).
+*   Use `MediaDevices.getUserMedia` to get video frames.
+*   For each frame, run the same preprocess → inference → postprocess → render pipeline.
+*   Use `requestVideoFrameCallback` for efficient scheduling and backpressure management to maintain a stable FPS.
 
 ---
 
 ## 11) Platform & Compatibility
 
-* Desktop: Chrome/Edge (stable WebGPU), Safari 17+ (macOS/iOS), Firefox (Nightly/flagged as needed).
-* Mobile: iOS 17+ Safari; Android Chrome 115+.
-* Graceful degradation: If WebGPU unsupported, show info and disable inference (no CPU fallback in v1 to keep scope tight).
+*   Desktop: Chrome/Edge (stable WebGPU), Safari 17+ (macOS/iOS), Firefox (Nightly/flagged as needed).
+*   Mobile: iOS 17+ Safari; Android Chrome 115+.
+*   Graceful degradation: If WebGPU unsupported, show info and disable inference (no CPU fallback in v1 to keep scope tight).
 
 ---
 
 ## 12) Performance & Observability
 
-* Warmup pass after model load to compile pipelines.
-* Cache model binaries with `CacheStorage`; versioned URLs for invalidation.
-* Use timer markers around preprocess/inference/postprocess; expose in a small dev panel (opt‑in).
-* Memory cap heuristics: prevent >256MB GPU buffer allocations on mobile.
+*   Warmup pass after model load to compile pipelines.
+*   Cache model binaries with `CacheStorage`; versioned URLs for invalidation.
+*   Use timer markers around preprocess/inference/postprocess; expose in a small dev panel (opt‑in).
+*   Memory cap heuristics: prevent >256MB GPU buffer allocations on mobile.
 
 ---
 
 ## 13) Security & Privacy
 
-* No uploads; use `ObjectURL`/in‑memory blobs only.
-* Limit camera access to explicit user action; stop tracks on exit.
-* CSP with `wasm-unsafe-eval` as needed, minimal external origins.
-* Service worker: avoid caching camera frames; cache only static assets & models.
+*   No uploads; use `ObjectURL`/in‑memory blobs only.
+*   Limit camera access to explicit user action; stop tracks on exit.
+*   CSP with `wasm-unsafe-eval` as needed, minimal external origins.
+*   Service worker: avoid caching camera frames; cache only static assets & models.
 
 ---
 
 ## 14) Offline / PWA
 
-* Installable PWA (manifest + icons).
-* Service Worker precaches app shell; runtime caches model files on first use.
-* Offline badge appears when network is unavailable; app remains functional for previously used styles.
+*   Installable PWA (manifest + icons).
+*   Service Worker precaches app shell; runtime caches model files on first use.
+*   Offline badge appears when network is unavailable; app remains functional for previously used styles.
 
 ---
 
@@ -239,130 +236,120 @@ A privacy-first, entirely in-browser image style transfer web app. Users upload 
 
 ```
 / (app root)
-├── index.html
+├── package.json
+├── next.config.js
 ├── src/
-│   ├── main.ts (UI bootstrap / WASM loader)
-│   ├── ui/
-│   │   ├── App.tsx
+│   ├── app/
+│   │   └── page.tsx (Main React component)
+│   ├── components/
 │   │   ├── Controls.tsx
 │   │   └── CanvasView.tsx
 │   └── wasm/
-│       └── vibecoding_wasm_bg.wasm (built)
+│       └── (built wasm package from rust)
 ├── rust/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs (wasm-bindgen exports)
-│       ├── infer.rs (wonnx session & runners)
-│       └── image_ops.rs (pre/postprocess)
+│       └── image_ops.rs (pre/postprocess logic)
 ├── public/
 │   ├── models/
 │   │   ├── manifest.json
 │   │   ├── vangogh_v1.onnx
-│   │   ├── picasso_v1.onnx
-│   │   └── cyberpunk_v1.onnx
-│   ├── sw.js (service worker)
+│   │   └── ...
 │   └── icons/* (PWA)
-└── vite.config.ts
+└── tsconfig.json
 ```
 
 ---
 
 ## 16) API / WASM Interface (example)
 
-**Rust (wasm-bindgen)**
+**Rust (`lib.rs`)**
 
 ```rust
 #[wasm_bindgen]
-pub async fn init(model_bytes: Vec<u8>) -> Result<(), JsValue> { /* ... */ }
+pub fn preprocess_image(image_bytes: &[u8], width: u32, height: u32) -> Result<Float32Array, JsValue> {
+    // ...
+}
 
 #[wasm_bindgen]
-pub fn stylize(
-  input_rgba: &[u8], width: u32, height: u32, strength: f32
-) -> Result<Vec<u8>, JsValue> { /* returns RGBA bytes */ }
-
-#[wasm_bindgen]
-pub fn supports_webgpu() -> bool { /* ... */ }
+pub fn postprocess_image(output_tensor: Float32Array, original_image_bytes: &[u8], strength: f32) -> Result<Uint8Array, JsValue> {
+    // ...
+}
 ```
 
-**TypeScript**
+**TypeScript (React Component)**
 
 ```ts
-await wasm.init(modelArrayBuffer);
-const outRgba = wasm.stylize(imgRgba, w, h, strength);
-canvas.putImageData(new ImageData(outRgba, w, h), 0, 0);
+import { InferenceSession } from 'onnxruntime-web/webgpu';
+import * as wasm from '../wasm/pkg';
+
+// In an async function:
+const session = await InferenceSession.create('./models/model.onnx', { executionProviders: ['webgpu'] });
+const tensor = wasm.preprocess_image(imageBytes, 512, 512);
+const results = await session.run({ input: tensor });
+const outputRgba = wasm.postprocess_image(results.output, imageBytes, 0.8);
+canvasContext.putImageData(new ImageData(outputRgba, 512, 512), 0, 0);
 ```
 
 ---
 
 ## 17) Acceptance Criteria
 
-* ✅ Loads and runs at least **3 styles** from registry; each style lazy-loaded upon selection.
-* ✅ Side-by-side preview, with **Style Strength** slider blending in real time.
-* ✅ **Download PNG** outputs a file matching the preview resolution.
-* ✅ **Reset** restores original image and clears style selection.
-* ✅ **Offline**: After first load, app shell is cached; previously used model(s) run offline.
-* ✅ **Metrics** panel shows per-stage timings (toggleable).
-* ✅ (Bonus) Webcam mode achieves ≥10 FPS @ ≥256px on a 2021+ laptop.
+*   ✅ Loads and runs at least **3 styles** from registry; each style lazy-loaded upon selection.
+*   ✅ Side-by-side preview, with **Style Strength** slider blending in real time.
+*   ✅ **Download PNG** outputs a file matching the preview resolution.
+*   ✅ **Reset** restores original image and clears style selection.
+*   ✅ **Offline**: After first load, app shell is cached; previously used model(s) run offline.
+*   ✅ **Metrics** panel shows per-stage timings (toggleable).
+*   ✅ (Bonus) Webcam mode achieves ≥10 FPS @ ≥256px on a 2021+ laptop.
 
 ---
 
 ## 18) Risks & Mitigations
 
-* **WebGPU availability**: Some browsers/devices lack support → Detect & message clearly; list known-good browsers.
-* **Model size**: Larger models hurt first-use latency → Quantize to FP16; consider 8‑bit weights if supported by runtime.
-* **WASM↔JS copies**: Excessive memcpy → Use shared `Uint8Array` views; avoid redundant conversions.
-* **Mobile thermals**: Sustained GPU use may throttle → Adaptive resolution; frame skipping for webcam.
+*   **WebGPU availability**: Some browsers/devices lack support → Detect & message clearly; list known-good browsers.
+*   **Model size**: Larger models hurt first-use latency → Quantize to FP16; consider 8‑bit weights if supported by runtime.
+*   **WASM↔JS copies**: Excessive memcpy → Use shared `Uint8Array` views; avoid redundant conversions.
+*   **Mobile thermals**: Sustained GPU use may throttle → Adaptive resolution; frame skipping for webcam.
 
 ---
 
 ## 19) Roadmap / Milestones
 
-* **Week 1**: Project scaffolding, WebGPU feature detect, WASM build pipeline, basic UI with upload.
-* **Week 2**: Integrate `wonnx`; load one ONNX model; E2E stylize a static image; implement blend + PNG download.
-* **Week 3**: Model registry + lazy loading; service worker + offline; responsive side-by-side UI.
-* **Week 4**: Performance pass; metrics panel; polish, a11y, PWA install; bonus webcam mode.
+*   **Week 1**: Project scaffolding (Next.js + Rust/WASM), `onnxruntime-web` setup, WebGPU feature detection, basic UI with image upload.
+*   **Week 2**: Implement WASM pre- and post-processing functions. Integrate `onnxruntime-web` to achieve a full E2E style transfer on a single static image.
+*   **Week 3**: Implement model registry, lazy loading, and style selection UI. Implement blending slider and PNG download.
+*   **Week 4**: Implement Service Worker for offline caching. Polish UI/UX, add metrics panel, and address accessibility.
+*   **Bonus**: Implement webcam mode with adaptive quality.
 
 ---
 
 ## 20) Rust/WebAssembly/WebGPU Learning Resources (curated)
 
-**Rust**
+**Core Technologies**
 
-* *The Rust Programming Language* ("The Book"): ownership, borrowing, lifetimes.
-* *Rust by Example*: practical snippets.
+*   **`onnxruntime-web`**: Official documentation for WebGPU inference.
+*   **React/Next.js**: Official documentation.
+*   **Rust and WebAssembly (rustwasm)**: The canonical book for `wasm-bindgen` and JS ↔ Rust interop patterns.
 
-**Rust × WebAssembly**
+**WebGPU**
 
-* *Rust and WebAssembly (rustwasm)*: wasm-bindgen, wasm-pack, passing data across the boundary.
-* *wasm-bindgen Guide*: JS ↔ Rust interop patterns.
+*   *WebGPU Fundamentals* or MDN WebGPU guide.
 
-**WebGPU & wgpu**
+**Image Processing in Rust**
 
-* *WebGPU Fundamentals* or MDN WebGPU guide.
-* *wgpu* examples & docs (the Rust-friendly WebGPU layer).
-
-**ONNX in the Browser**
-
-* *wonnx* (Rust ONNX on wgpu) — great fit for pure Rust/WASM.
-* Alternative (hybrid): *onnxruntime-web* (JS) with WebGPU backend.
-
-**Image Processing**
-
-* `image` crate docs; `fast_image_resize` for efficient scaling.
+*   `image` crate documentation.
 
 **PWA/Offline**
 
-* Workbox (service workers), MDN guides for CacheStorage/IndexedDB, web app manifests.
-
-**Extras**
-
-* WebAssembly debugging in Chrome DevTools; `console_error_panic_hook` to surface Rust panics.
+*   Workbox, MDN guides for CacheStorage/IndexedDB, and web app manifests.
 
 ---
 
 ## 21) Definition of Done (DoD)
 
-* All acceptance criteria met.
-* Automated CI build (Rust + UI), static analysis (clippy), and smoke tests pass.
-* Tested on latest Chrome (desktop & Android) and Safari (macOS & iOS).
-* Public demo page served statically; no server APIs required.
+*   All acceptance criteria met.
+*   Automated CI build (Rust + UI), static analysis (clippy), and smoke tests pass.
+*   Tested on latest Chrome (desktop & Android) and Safari (macOS & iOS).
+*   Public demo page served statically; no server APIs required.

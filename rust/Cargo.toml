@@ -8,11 +8,33 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
-wonnx = "0.5.1"
-wgpu = "0.19"
 image = "0.25"
 thiserror = "1.0"
+console_error_panic_hook = "0.1"
 
 # Wonnx requires getrandom with the "js" feature when compiling for wasm
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
+web-sys = { version = "0.3", features = [
+    'GpuDevice',
+    'GpuCanvasContext',
+    'GpuTexture',
+    'GpuBuffer',
+    'GpuSampler',
+    'GpuShaderModule',
+    'GpuRenderPipeline',
+    'GpuComputePipeline',
+    'GpuBindGroupLayout',
+    'GpuPipelineLayout',
+    'GpuBindGroup',
+    'GpuCommandEncoder',
+    'GpuRenderPassEncoder',
+    'GpuComputePassEncoder',
+    'GpuCommandBuffer',
+    'GpuQueue',
+    'GpuTextureView',
+    'GpuRenderBundleEncoder',
+    'GpuRenderBundle',
+    'GpuQuerySet',
+    'Gpu',
+]}
