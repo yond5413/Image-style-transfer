@@ -1,0 +1,34 @@
+# Rust
+# Ignore the build directory
+/rust/target/
+
+# Node.js / Frontend
+# Ignore dependencies
+/node_modules/
+
+# Ignore build output
+/dist/
+/build/
+
+# Ignore generated WASM files (they are build artifacts)
+# Based on the PRD, these will be built into a directory like this.
+/src/wasm/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Editor directories
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
