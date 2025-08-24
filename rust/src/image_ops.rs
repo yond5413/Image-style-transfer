@@ -1,4 +1,4 @@
-use image::{imageops::FilterType, DynamicImage, ImageBuffer, Rgba};
+use image::{imageops::FilterType, DynamicImage, ImageBuffer, Rgba, GenericImageView};
 use thiserror::Error;
 
 #[derive(Debug, Error)]

@@ -24,3 +24,8 @@ pub fn postprocess(output_tensor: Float32Array, original_image_bytes: &[u8], wid
     let result_rgba = postprocess_image(output_vec, original_image_bytes, width, height, strength).map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(Uint8Array::from(result_rgba.as_slice()))
 }
+
+#[wasm_bindgen]
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
