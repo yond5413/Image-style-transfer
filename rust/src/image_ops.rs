@@ -51,11 +51,11 @@ pub fn preprocess_image(
     let mut b_channel = Vec::with_capacity((target_width * target_height) as usize);
 
     // 5. Iterate over the pixels and populate the channel vectors.
-    //    Normalize pixel values from [0, 255] to [0.0, 1.0].
+    //    Pixel values remain in [0, 255] range, cast to f32.
     for pixel in rgb_img.pixels() {
-        r_channel.push(pixel[0] as f32 / 255.0);
-        g_channel.push(pixel[1] as f32 / 255.0);
-        b_channel.push(pixel[2] as f32 / 255.0);
+        r_channel.push(pixel[0] as f32);
+        g_channel.push(pixel[1] as f32);
+        b_channel.push(pixel[2] as f32);
     }
 
     // 6. Combine the channels into the final tensor in NCHW format.
@@ -77,11 +77,12 @@ pub fn postprocess_image(
 ) -> Result<Vec<u8>, ImageError> {
     let stylized_img = tensor_to_image(output_tensor, width, height)?;
     let original_img = image::load_from_memory(original_image_bytes)?;
+    let resized_original_img = original_img.resize_exact(width, height, FilterType::Triangle);
 
     let mut output_img = ImageBuffer::new(width, height);
 
     for (x, y, stylized_pixel) in stylized_img.enumerate_pixels() {
-        let original_pixel = original_img.get_pixel(x, y);
+        let original_pixel = resized_original_img.get_pixel(x, y);
         let blended_pixel = blend_pixels(original_pixel, *stylized_pixel, strength);
         output_img.put_pixel(x, y, blended_pixel);
     }
