@@ -1,0 +1,15 @@
+{
+  "name": "image-style-transfer",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "image_style_transfer_bg.wasm",
+    "image_style_transfer.js",
+    "image_style_transfer.d.ts"
+  ],
+  "main": "image_style_transfer.js",
+  "types": "image_style_transfer.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
