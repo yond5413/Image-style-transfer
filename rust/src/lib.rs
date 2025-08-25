@@ -29,3 +29,4 @@ pub fn postprocess(output_tensor: Float32Array, original_image_bytes: &[u8], wid
 pub fn add(a: i32, b: i32) -> i32 {
     a + b
 }
+

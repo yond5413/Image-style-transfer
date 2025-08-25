@@ -27,6 +27,9 @@ export default function Home() {
   const originalCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const outputCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const wasmRef = useRef<any>(null);
+  
+  // Maximum display size for both canvases
+  const MAX_CANVAS_SIZE = 300;
 
   // Load WASM and fetch models on component mount
   useEffect(() => {
@@ -51,8 +54,12 @@ export default function Home() {
         if (manifest.models.length > 0) {
           setSelectedModelId(manifest.models[0].id);
         }
-      } catch (e) {
-        console.error(e);
+      } catch (e: unknown) {
+        if (e instanceof Error) {
+          console.error(e.message);
+        } else {
+          console.error(e);
+        }
         setStatus("Failed to load WASM or models");
       }
     }
@@ -79,17 +86,28 @@ export default function Home() {
       setOriginalImageBytes(arrayBuffer);
       setOriginalImageUrl(imageUrl);
 
-      // Draw original image to its canvas
+      // Draw original image to its canvas with size constraint
       const img = new Image();
       img.src = imageUrl;
       img.onload = () => {
         const canvas = originalCanvasRef.current;
         if (!canvas) return;
-        canvas.width = img.width;
-        canvas.height = img.height;
+        
+        // Calculate constrained dimensions while maintaining aspect ratio
+        let displayWidth = img.width;
+        let displayHeight = img.height;
+        
+        if (img.width > MAX_CANVAS_SIZE || img.height > MAX_CANVAS_SIZE) {
+          const ratio = Math.min(MAX_CANVAS_SIZE / img.width, MAX_CANVAS_SIZE / img.height);
+          displayWidth = Math.floor(img.width * ratio);
+          displayHeight = Math.floor(img.height * ratio);
+        }
+        
+        canvas.width = displayWidth;
+        canvas.height = displayHeight;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
-        ctx.drawImage(img, 0, 0, img.width, img.height);
+        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
       };
     };
     reader.readAsArrayBuffer(file);
@@ -143,15 +161,30 @@ export default function Home() {
         setStatus("Done!");
         const outputCanvas = outputCanvasRef.current;
         if (!outputCanvas) return;
-        outputCanvas.width = modelWidth;
-        outputCanvas.height = modelHeight;
+        
+        // Use the same constrained size as the original canvas
+        const originalCanvas = originalCanvasRef.current;
+        if (originalCanvas) {
+          outputCanvas.width = originalCanvas.width;
+          outputCanvas.height = originalCanvas.height;
+        } else {
+          // Fallback to model dimensions if original canvas is not available
+          outputCanvas.width = modelWidth;
+          outputCanvas.height = modelHeight;
+        }
+        
         const outputCtx = outputCanvas.getContext('2d');
         if (!outputCtx) return;
         outputCtx.putImageData(new ImageData(new Uint8ClampedArray(outputRgba), modelWidth, modelHeight), 0, 0);
       };
-    } catch (e) {
-      console.error(e);
-      setStatus(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        console.error(e);
+        setStatus(`Error: ${e.message}`);
+      } else {
+        console.error(e);
+        setStatus(`Error: An unknown error occurred`);
+      }
     }
   }
 
@@ -179,12 +212,12 @@ export default function Home() {
       <div className="flex gap-8 mt-8">
         <div className="flex flex-col items-center">
           <h3>Original Image</h3>
-          <canvas ref={originalCanvasRef} className="border border-gray-300"></canvas>
+          <canvas ref={originalCanvasRef} className="border border-gray-300 max-w-[300px] max-h-[300px] w-auto h-auto"></canvas>
           {originalImageUrl && <img src={originalImageUrl} alt="Original" className="mt-2 max-w-xs max-h-xs" style={{ display: 'none' }} />}
         </div>
         <div className="flex flex-col items-center">
           <h3>Stylized Image</h3>
-          <canvas ref={outputCanvasRef} className="border border-gray-300"></canvas>
+          <canvas ref={outputCanvasRef} className="border border-gray-300 max-w-[300px] max-h-[300px] w-auto h-auto"></canvas>
         </div>
       </div>
     </main>

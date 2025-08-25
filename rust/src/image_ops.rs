@@ -99,11 +99,11 @@ fn tensor_to_image(
 
     for y in 0..height {
         for x in 0..width {
-            let r = (tensor[(y * width + x) as usize] * 255.0).max(0.0).min(255.0) as u8;
-            let g = (tensor[((height * width) + y * width + x) as usize] * 255.0)
+            let r = (tensor[(y * width + x) as usize]).max(0.0).min(255.0) as u8;
+            let g = (tensor[((height * width) + y * width + x) as usize])
                 .max(0.0)
                 .min(255.0) as u8;
-            let b = (tensor[((2 * height * width) + y * width + x) as usize] * 255.0)
+            let b = (tensor[((2 * height * width) + y * width + x) as usize])
                 .max(0.0)
                 .min(255.0) as u8;
             img_buf.put_pixel(x, y, Rgba([r, g, b, 255]));

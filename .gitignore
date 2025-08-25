@@ -10,9 +10,11 @@
 /dist/
 /build/
 
-# Ignore generated WASM files (they are build artifacts)
-# Based on the PRD, these will be built into a directory like this.
-/src/wasm/
+# Ignore Rust build artifacts
+/rust/target/
+
+# Allow WASM files to be committed (needed for production deployment)
+# WASM files are committed to ensure they're available in production
 
 # Logs
 *.log
