@@ -50,12 +50,11 @@ pub fn preprocess_image(
     let mut g_channel = Vec::with_capacity((target_width * target_height) as usize);
     let mut b_channel = Vec::with_capacity((target_width * target_height) as usize);
 
-    // 5. Iterate over the pixels and populate the channel vectors.
-    //    Pixel values remain in [0, 255] range, cast to f32.
+    // 5. Iterate over the pixels, normalize them to [0, 1], and populate the channel vectors.
     for pixel in rgb_img.pixels() {
-        r_channel.push(pixel[0] as f32);
-        g_channel.push(pixel[1] as f32);
-        b_channel.push(pixel[2] as f32);
+        r_channel.push(pixel[0] as f32 / 255.0);
+        g_channel.push(pixel[1] as f32 / 255.0);
+        b_channel.push(pixel[2] as f32 / 255.0);
     }
 
     // 6. Combine the channels into the final tensor in NCHW format.

@@ -1,19 +1,28 @@
-import type { Metadata } from 'next'
+'use client';
+
 import { Inter } from 'next/font/google'
 import './globals.css'
+import { useEffect } from 'react';
 
 const inter = Inter({ subsets: ['latin'] })
-
-export const metadata: Metadata = {
-  title: 'Image Style Transfer',
-  description: 'In-browser image style transfer with WebGPU',
-}
 
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(registration => {
+          console.log('SW registered: ', registration);
+        }).catch(registrationError => {
+          console.log('SW registration failed: ', registrationError);
+        });
+      });
+    }
+  }, []);
+
   return (
     <html lang="en">
       <body className={inter.className}>{children}</body>
