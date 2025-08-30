@@ -130,13 +130,21 @@ export function postprocess(output_tensor, original_image_bytes, width, height, 
 }
 
 /**
- * @param {number} a
- * @param {number} b
- * @returns {number}
+ * @param {Float32Array} output_tensor
+ * @param {Uint8Array} original_frame_pixels
+ * @param {number} width
+ * @param {number} height
+ * @param {number} strength
+ * @returns {Uint8Array}
  */
-export function add(a, b) {
-    const ret = wasm.add(a, b);
-    return ret;
+export function postprocess_frame(output_tensor, original_frame_pixels, width, height, strength) {
+    const ptr0 = passArray8ToWasm0(original_frame_pixels, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.postprocess_frame(output_tensor, ptr0, len0, width, height, strength);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 async function __wbg_load(module, imports) {

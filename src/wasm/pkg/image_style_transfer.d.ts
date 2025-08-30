@@ -2,7 +2,7 @@
 /* eslint-disable */
 export function preprocess(image_bytes: Uint8Array, target_width: number, target_height: number): Float32Array;
 export function postprocess(output_tensor: Float32Array, original_image_bytes: Uint8Array, width: number, height: number, strength: number): Uint8Array;
-export function add(a: number, b: number): number;
+export function postprocess_frame(output_tensor: Float32Array, original_frame_pixels: Uint8Array, width: number, height: number, strength: number): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -10,7 +10,7 @@ export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly preprocess: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly postprocess: (a: any, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
-  readonly add: (a: number, b: number) => number;
+  readonly postprocess_frame: (a: any, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
