@@ -1,41 +1,36 @@
 
 import React from 'react';
-import { Tensor } from 'onnxruntime-web';
 
 interface ModelManifestEntry {
   id: string;
   name: string;
 }
 
-interface ControlPanelProps {
+interface ImageControlPanelProps {
   fileName: string | null;
   models: ModelManifestEntry[];
   selectedModelId: string | null;
   styleStrength: number;
-  outputTensor: Tensor | null;
+  outputLoaded: boolean;
   handleImageUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleStyleChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   handleStrengthChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleDownload: () => void;
   handleReset: () => void;
-  handleWebcam: () => void;
-  isWebcamOn: boolean;
 }
 
-export function ControlPanel({ 
-  fileName, 
-  models, 
-  selectedModelId, 
-  styleStrength, 
-  outputTensor, 
-  handleImageUpload, 
-  handleStyleChange, 
-  handleStrengthChange, 
-  handleDownload, 
-  handleReset, 
-  handleWebcam,
-  isWebcamOn
-}: ControlPanelProps) {
+export function ImageControlPanel({
+  fileName,
+  models,
+  selectedModelId,
+  styleStrength,
+  outputLoaded,
+  handleImageUpload,
+  handleStyleChange,
+  handleStrengthChange,
+  handleDownload,
+  handleReset,
+}: ImageControlPanelProps) {
   return (
     <div className="relative flex flex-col items-center gap-4 mt-8 w-full max-w-md">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
@@ -69,14 +64,13 @@ export function ControlPanel({
           value={styleStrength}
           onChange={handleStrengthChange}
           className="w-full"
-          disabled={!outputTensor}
+          disabled={!outputLoaded}
         />
       </div>
 
       <div className="flex gap-4 mt-4">
-        <button onClick={handleDownload} disabled={!outputTensor} className="p-2 border rounded bg-blue-500 text-white disabled:bg-gray-400">Download</button>
+        <button onClick={handleDownload} disabled={!outputLoaded} className="p-2 border rounded bg-blue-500 text-white disabled:bg-gray-400">Download</button>
         <button onClick={handleReset} className="p-2 border rounded bg-red-500 text-white">Reset</button>
-        <button onClick={handleWebcam} className={`p-2 border rounded text-white ${isWebcamOn ? 'bg-red-500' : 'bg-green-500'}`}>{isWebcamOn ? 'Stop Webcam' : 'Start Webcam'}</button>
       </div>
     </div>
   );

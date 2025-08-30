@@ -1,7 +1,7 @@
 pub mod image_ops;
 
 use wasm_bindgen::prelude::*;
-use image_ops::{preprocess_image, postprocess_image, postprocess_video_frame};
+use image_ops::{preprocess_image, postprocess_image, postprocess_video_frame, preprocess_frame as preprocess_frame_rust};
 use js_sys::{Float32Array, Uint8Array};
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
@@ -14,6 +14,13 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 pub fn preprocess(image_bytes: &[u8], target_width: u32, target_height: u32) -> Result<Float32Array, JsValue> {
     console_error_panic_hook::set_once();
     let tensor = preprocess_image(image_bytes, target_width, target_height).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(Float32Array::from(tensor.as_slice()))
+}
+
+#[wasm_bindgen]
+pub fn preprocess_frame(frame_pixels: &[u8], frame_width: u32, frame_height: u32, target_width: u32, target_height: u32) -> Result<Float32Array, JsValue> {
+    console_error_panic_hook::set_once();
+    let tensor = preprocess_frame_rust(frame_pixels, frame_width, frame_height, target_width, target_height).map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(Float32Array::from(tensor.as_slice()))
 }
 

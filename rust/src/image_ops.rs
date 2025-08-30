@@ -1,5 +1,4 @@
-use image::{imageops::FilterType, DynamicImage, ImageBuffer, Rgba, GenericImageView, ImageFormat};
-use std::io::Cursor;
+use image::{imageops::FilterType, DynamicImage, ImageBuffer, Rgba, GenericImageView};
 
 use thiserror::Error;
 
@@ -68,6 +67,40 @@ pub fn preprocess_image(
 
     Ok(tensor)
 }
+
+pub fn preprocess_frame(
+    frame_pixels: &[u8],
+    frame_width: u32,
+    frame_height: u32,
+    target_width: u32,
+    target_height: u32,
+) -> Result<Vec<f32>, ImageError> {
+    let img_buf = ImageBuffer::<Rgba<u8>, _>::from_raw(frame_width, frame_height, frame_pixels.to_vec())
+        .ok_or_else(|| ImageError::Processing("Failed to create ImageBuffer from raw pixels".to_string()))?;
+    
+    let img = DynamicImage::ImageRgba8(img_buf);
+
+    let resized_img = img.resize_exact(target_width, target_height, FilterType::Triangle);
+
+    let rgb_img = resized_img.to_rgb8();
+    let mut r_channel = Vec::with_capacity((target_width * target_height) as usize);
+    let mut g_channel = Vec::with_capacity((target_width * target_height) as usize);
+    let mut b_channel = Vec::with_capacity((target_width * target_height) as usize);
+
+    for pixel in rgb_img.pixels() {
+        r_channel.push(pixel[0] as f32 / 255.0);
+        g_channel.push(pixel[1] as f32 / 255.0);
+        b_channel.push(pixel[2] as f32 / 255.0);
+    }
+
+    let mut tensor = Vec::with_capacity((3 * target_width * target_height) as usize);
+    tensor.extend_from_slice(&r_channel);
+    tensor.extend_from_slice(&g_channel);
+    tensor.extend_from_slice(&b_channel);
+
+    Ok(tensor)
+}
+
 
 pub fn postprocess_image(
     output_tensor: Vec<f32>,

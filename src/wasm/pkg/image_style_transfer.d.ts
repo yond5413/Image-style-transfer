@@ -1,6 +1,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export function preprocess(image_bytes: Uint8Array, target_width: number, target_height: number): Float32Array;
+export function preprocess_frame(frame_pixels: Uint8Array, frame_width: number, frame_height: number, target_width: number, target_height: number): Float32Array;
 export function postprocess(output_tensor: Float32Array, original_image_bytes: Uint8Array, width: number, height: number, strength: number): Uint8Array;
 export function postprocess_frame(output_tensor: Float32Array, original_frame_pixels: Uint8Array, width: number, height: number, strength: number): Uint8Array;
 
@@ -9,6 +10,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly preprocess: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly preprocess_frame: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
   readonly postprocess: (a: any, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
   readonly postprocess_frame: (a: any, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;

@@ -112,6 +112,24 @@ export function preprocess(image_bytes, target_width, target_height) {
 }
 
 /**
+ * @param {Uint8Array} frame_pixels
+ * @param {number} frame_width
+ * @param {number} frame_height
+ * @param {number} target_width
+ * @param {number} target_height
+ * @returns {Float32Array}
+ */
+export function preprocess_frame(frame_pixels, frame_width, frame_height, target_width, target_height) {
+    const ptr0 = passArray8ToWasm0(frame_pixels, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.preprocess_frame(ptr0, len0, frame_width, frame_height, target_width, target_height);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * @param {Float32Array} output_tensor
  * @param {Uint8Array} original_image_bytes
  * @param {number} width

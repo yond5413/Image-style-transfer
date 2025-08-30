@@ -2,6 +2,7 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const preprocess: (a: number, b: number, c: number, d: number) => [number, number, number];
+export const preprocess_frame: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const postprocess: (a: any, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const postprocess_frame: (a: any, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const __wbindgen_free: (a: number, b: number, c: number) => void;

@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { InferenceSession, Tensor } from 'onnxruntime-web';
 import * as ort from 'onnxruntime-web';
@@ -19,14 +18,13 @@ interface ModelManifest {
   models: ModelManifestEntry[];
 }
 
-export function useModelRunner(originalImageBytes: ArrayBuffer | null, originalCanvasRef: React.RefObject<HTMLCanvasElement>) {
+export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElement>) {
   const [session, setSession] = useState<InferenceSession | null>(null);
   const [sessionCache, setSessionCache] = useState<Record<string, InferenceSession>>({});
-  const [status, setStatus] = useState("Not loaded");
+  const [status, setStatus] = useState("Loading WebAssembly...");
   const [models, setModels] = useState<ModelManifestEntry[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [styleStrength, setStyleStrength] = useState(0.8);
-  const [outputTensor, setOutputTensor] = useState<Tensor | null>(null);
   const outputCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const wasmRef = useRef<any>(null);
 
@@ -42,7 +40,7 @@ export function useModelRunner(originalImageBytes: ArrayBuffer | null, originalC
         const wasm = await import("../wasm/pkg");
         await wasm.default();
         wasmRef.current = wasm;
-        setStatus("WASM loaded");
+        setStatus("WebAssembly loaded. Select a style and image to start.");
 
         const manifestResponse = await fetch('/models/manifest.json');
         const manifest: ModelManifest = await manifestResponse.json();
@@ -62,32 +60,53 @@ export function useModelRunner(originalImageBytes: ArrayBuffer | null, originalC
     loadWasmAndModels();
   }, []);
 
-  const runInference = useCallback(async (imageBytes: ArrayBuffer, modelId: string) => {
-    if (!wasmRef.current) {
-      setStatus("WASM not loaded yet");
-      return;
+  const createSession = useCallback(async (modelId: string) => {
+    let currentSession = sessionCache[modelId];
+    if (currentSession) {
+      if (session !== currentSession) {
+        setSession(currentSession);
+      }
+      return currentSession;
     }
 
     const modelData = models.find(m => m.id === modelId);
     if (!modelData) {
       setStatus(`Model ${modelId} not found`);
-      return;
+      return null;
     }
 
-    try {
-      let currentSession = sessionCache[modelId];
-      if (!currentSession) {
-        setStatus(`Loading ${modelData.name} model...`);
-        const modelFile = modelData.file;
-        ort.env.wasm.wasmPaths = '/';
-        
-        currentSession = await InferenceSession.create(modelFile, { executionProviders: ['webgpu', 'wasm'] });
-        setSessionCache(prev => ({ ...prev, [modelId]: currentSession }));
-        setStatus(`Model ${modelData.name} loaded`);
-      }
-      
-      setSession(currentSession);
+    setStatus(`Loading ${modelData.name} model...`);
+    const modelFile = modelData.file;
+    ort.env.wasm.wasmPaths = '/';
+    currentSession = await InferenceSession.create(modelFile, { executionProviders: ['webgpu', 'wasm'] });
 
+    setStatus(`Warming up ${modelData.name} model...`);
+    const modelShape = modelData.input.shape;
+    const dummyInput = new Tensor('float32', new Float32Array(modelShape[1] * modelShape[2] * modelShape[3]), modelShape);
+    const inputName = currentSession.inputNames[0];
+    const feeds = { [inputName]: dummyInput };
+    await currentSession.run(feeds);
+
+    setSessionCache(prev => ({ ...prev, [modelId]: currentSession }));
+    setSession(currentSession);
+    setStatus(`Model ${modelData.name} loaded`);
+    return currentSession;
+  }, [models, session, sessionCache, setSession, setSessionCache, setStatus]);
+
+  useEffect(() => {
+    if (selectedModelId) {
+      createSession(selectedModelId);
+    }
+  }, [selectedModelId, createSession]);
+
+  const runInferenceOnImage = useCallback(async (imageBytes: ArrayBuffer) => {
+    if (!wasmRef.current || !selectedModelId) return;
+
+    try {
+      const currentSession = await createSession(selectedModelId);
+      if (!currentSession) return;
+
+      const modelData = models.find(m => m.id === selectedModelId)!;
       const modelShape = modelData.input.shape;
       const modelHeight = modelShape[2];
       const modelWidth = modelShape[3];
@@ -101,9 +120,77 @@ export function useModelRunner(originalImageBytes: ArrayBuffer | null, originalC
       const results = await currentSession.run(feeds);
       const outputName = currentSession.outputNames[0];
       const newOutputTensor = results[outputName];
+
+      setStatus("Postprocessing...");
+      const pixelData = wasmRef.current.postprocess(newOutputTensor.data, new Uint8Array(imageBytes), modelWidth, modelHeight, styleStrength);
+
+      setStatus("Done!");
+      const outputCanvas = outputCanvasRef.current;
+      if (!outputCanvas) return;
       
-      setOutputTensor(newOutputTensor);
+      const originalCanvas = originalCanvasRef.current;
+      if (originalCanvas) {
+          outputCanvas.width = originalCanvas.width;
+          outputCanvas.height = originalCanvas.height;
+      } else {
+          outputCanvas.width = modelWidth;
+          outputCanvas.height = modelHeight;
+      }
       
+      const outputCtx = outputCanvas.getContext('2d');
+      if (!outputCtx) return;
+
+      const imageData = new ImageData(new Uint8ClampedArray(pixelData), modelWidth, modelHeight);
+      
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = modelWidth;
+      tempCanvas.height = modelHeight;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) return;
+      tempCtx.putImageData(imageData, 0, 0);
+
+      outputCtx.drawImage(tempCanvas, 0, 0, outputCanvas.width, outputCanvas.height);
+
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        console.error(e.message);
+      } else {
+        console.error(e);
+        setStatus(`Error: An unknown error occurred`);
+      }
+    }
+  }, [createSession, selectedModelId, styleStrength, models, setStatus, originalCanvasRef]);
+
+  const runInferenceOnFrame = useCallback(async (canvas: HTMLCanvasElement) => {
+    if (!wasmRef.current || !selectedModelId) {
+      return;
+    }
+
+    try {
+      const currentSession = await createSession(selectedModelId);
+      if (!currentSession) return;
+
+      const modelData = models.find(m => m.id === selectedModelId)!;
+      const modelShape = modelData.input.shape;
+      const modelHeight = modelShape[2];
+      const modelWidth = modelShape[3];
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const framePixelData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+      const tensor = wasmRef.current.preprocess_frame(new Uint8Array(framePixelData), canvas.width, canvas.height, modelWidth, modelHeight);
+
+      const inputName = currentSession.inputNames[0];
+      const feeds = { [inputName]: new Tensor('float32', tensor, modelShape) };
+      const results = await currentSession.run(feeds);
+      const outputName = currentSession.outputNames[0];
+      const newOutputTensor = results[outputName];
+
+      const pixelData = wasmRef.current.postprocess_frame(newOutputTensor.data, new Uint8Array(framePixelData), modelWidth, modelHeight, styleStrength);
+
+      return new ImageData(new Uint8ClampedArray(pixelData), modelWidth, modelHeight);
     } catch (e: unknown) {
       if (e instanceof Error) {
         console.error(e);
@@ -113,75 +200,14 @@ export function useModelRunner(originalImageBytes: ArrayBuffer | null, originalC
         setStatus(`Error: An unknown error occurred`);
       }
     }
-  }, [models, sessionCache, setStatus, setSession, setOutputTensor]);
-
-  const postprocessAndDisplay = useCallback((tensor: Tensor, imageBytes: ArrayBuffer, strength: number) => {
-    if (!wasmRef.current || !selectedModelId) return;
-    
-    const modelData = models.find(m => m.id === selectedModelId);
-    if (!modelData) return;
-
-    const modelHeight = modelData.input.shape[2];
-    const modelWidth = modelData.input.shape[3];
-
-    setStatus("Postprocessing...");
-    const pixelData = wasmRef.current.postprocess(tensor.data, new Uint8Array(imageBytes), modelWidth, modelHeight, strength);
-
-    setStatus("Done!");
-    const outputCanvas = outputCanvasRef.current;
-    if (!outputCanvas) return;
-    
-    const originalCanvas = originalCanvasRef.current;
-    if (originalCanvas) {
-        outputCanvas.width = originalCanvas.width;
-        outputCanvas.height = originalCanvas.height;
-    } else {
-        outputCanvas.width = modelWidth;
-        outputCanvas.height = modelHeight;
-    }
-    
-    const outputCtx = outputCanvas.getContext('2d');
-    if (!outputCtx) return;
-
-    const imageData = new ImageData(new Uint8ClampedArray(pixelData), modelWidth, modelHeight);
-    
-    // Create a temporary canvas to draw the model-sized image
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = modelWidth;
-    tempCanvas.height = modelHeight;
-    const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return;
-    tempCtx.putImageData(imageData, 0, 0);
-
-    // Scale the image from the temporary canvas to the output canvas
-    outputCtx.drawImage(tempCanvas, 0, 0, outputCanvas.width, outputCanvas.height);
-
-  }, [selectedModelId, models, setStatus, originalCanvasRef]);
-
-  useEffect(() => {
-    if (originalImageBytes && selectedModelId) {
-      runInference(originalImageBytes, selectedModelId);
-    }
-  }, [originalImageBytes, selectedModelId, runInference]);
-
-  useEffect(() => {
-    if (outputTensor && originalImageBytes) {
-      postprocessAndDisplay(outputTensor, originalImageBytes, styleStrength);
-    }
-  }, [styleStrength, outputTensor, originalImageBytes, postprocessAndDisplay]);
+  }, [createSession, selectedModelId, styleStrength, models, setStatus]);
 
   const handleStyleChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedModelId(event.target.value);
-    setOutputTensor(null);
   }, []);
 
   const handleStrengthChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     setStyleStrength(parseFloat(event.target.value));
-  }, []);
-
-  const resetModel = useCallback(() => {
-    setOutputTensor(null);
-    setStatus("Not loaded");
   }, []);
 
   return {
@@ -189,13 +215,10 @@ export function useModelRunner(originalImageBytes: ArrayBuffer | null, originalC
     models,
     selectedModelId,
     styleStrength,
-    outputTensor,
     outputCanvasRef,
     handleStyleChange,
     handleStrengthChange,
-    resetModel,
-    setOutputTensor,
-    setStatus,
-    runInference
+    runInferenceOnImage,
+    runInferenceOnFrame
   };
 }
