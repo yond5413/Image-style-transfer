@@ -6,6 +6,8 @@ import { ImageControlPanel } from '../../components/ImageControlPanel';
 import { CanvasDisplay } from '../../components/CanvasDisplay';
 import { useEffect } from 'react';
 
+const DISPLAY_RESOLUTION = 480;
+
 export default function ImagePage() {
   const { 
     originalImageBytes, 
@@ -22,7 +24,7 @@ export default function ImagePage() {
     if (originalImageBytes && model.runInferenceOnImage) {
       model.runInferenceOnImage(originalImageBytes);
     }
-  }, [originalImageBytes, model.runInferenceOnImage, model.styleStrength, model.selectedModelId]);
+  }, [originalImageBytes, model.runInferenceOnImage, model.styleStrength, model.selectedModelId, model]);
 
   const handleReset = () => {
     resetImage();
@@ -64,6 +66,8 @@ export default function ImagePage() {
             outputCanvasRef={model.outputCanvasRef}
             originalImageUrl={originalImageUrl}
             status={model.status}
+            width={DISPLAY_RESOLUTION}
+            height={DISPLAY_RESOLUTION}
           />
         </div>
       </div>
