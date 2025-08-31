@@ -1,41 +1,29 @@
 "use client";
 
-import { useImageUploader } from '../../hooks/useImageUploader';
-import { useModelRunner } from '../../hooks/useModelRunner';
+import { useImageProcessor } from '../../hooks/useImageProcessor';
 import { ImageControlPanel } from '../../components/ImageControlPanel';
 import { CanvasDisplay } from '../../components/CanvasDisplay';
-import { useEffect } from 'react';
 
 const DISPLAY_RESOLUTION = 480;
 
 export default function ImagePage() {
-  const { 
-    originalImageBytes, 
-    fileName, 
-    originalCanvasRef, 
-    handleImageUpload, 
-    resetImage,
-    originalImageUrl
-  } = useImageUploader();
-
-  const model = useModelRunner(originalCanvasRef);
-
-  useEffect(() => {
-    if (originalImageBytes && model.runInferenceOnImage) {
-      model.runInferenceOnImage(originalImageBytes);
-    }
-  }, [originalImageBytes, model.runInferenceOnImage, model.styleStrength, model.selectedModelId, model]);
-
-  const handleReset = () => {
-    resetImage();
-    if (model.outputCanvasRef.current) {
-        const ctx = model.outputCanvasRef.current.getContext('2d');
-        ctx?.clearRect(0, 0, model.outputCanvasRef.current.width, model.outputCanvasRef.current.height);
-      }
-  };
+  const {
+    status,
+    models,
+    selectedModelId,
+    styleStrength,
+    fileName,
+    originalImageUrl,
+    originalCanvasRef,
+    outputCanvasRef,
+    handleImageUpload,
+    handleStyleChange,
+    handleStrengthChange,
+    reset,
+  } = useImageProcessor();
 
   const handleDownload = () => {
-    const canvas = model.outputCanvasRef.current;
+    const canvas = outputCanvasRef.current;
     if (!canvas) return;
     const link = document.createElement('a');
     link.download = 'stylized-image.png';
@@ -49,23 +37,23 @@ export default function ImagePage() {
         <div className="lg:w-1/3">
           <ImageControlPanel
             fileName={fileName}
-            models={model.models}
-            selectedModelId={model.selectedModelId}
-            styleStrength={model.styleStrength}
+            models={models}
+            selectedModelId={selectedModelId}
+            styleStrength={styleStrength}
             handleImageUpload={handleImageUpload}
-            handleStyleChange={model.handleStyleChange}
-            handleStrengthChange={model.handleStrengthChange}
+            handleStyleChange={handleStyleChange}
+            handleStrengthChange={handleStrengthChange}
             handleDownload={handleDownload}
-            handleReset={handleReset}
+            handleReset={reset}
             outputLoaded={!!originalImageUrl}
           />
         </div>
         <div className="lg:w-2/3">
           <CanvasDisplay
             originalCanvasRef={originalCanvasRef}
-            outputCanvasRef={model.outputCanvasRef}
+            outputCanvasRef={outputCanvasRef}
             originalImageUrl={originalImageUrl}
-            status={model.status}
+            status={status}
             width={DISPLAY_RESOLUTION}
             height={DISPLAY_RESOLUTION}
           />
