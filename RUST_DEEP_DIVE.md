@@ -178,14 +178,4 @@ The `postprocess_frame` function is very similar to `postprocess`, but it is opt
 
 These small changes in the Rust code are crucial for reducing the latency of the video processing pipeline, making the difference between a choppy experience and a smooth, real-time style transfer.
 
----
-
-## 6. Known Issues
-
-### Style Strength Blending in `postprocess_video_frame`
-
-There is a known issue in the `postprocess_video_frame` function that affects the "Style Strength" feature for real-time video.
-
--   **Problem**: When converting the model's output tensor back into an image within the `tensor_to_image` helper function, the normalized floating-point color values (which are in a `[0.0, 1.0]` range) are not being scaled back to the standard `[0, 255]` integer range. They are being truncated, causing the stylized frame to render as almost completely black.
--   **Effect**: When the user lowers the style strength, the pipeline blends the original video frame with this black stylized frame, causing the output to become dark instead of smoothly transitioning back to the original, un-styled video.
--   **Status**: A fix involving scaling the tensor values (`value * 255.0`) was implemented but has been reverted. The incorrect implementation currently remains in the codebase. Future work is required to implement a viable solution for correct color value scaling in the post-processing pipeline.
+**Implementation Note:** The blending of the stylized frame with the original video frame is not handled in Rust. To resolve a persistent bug with how the original frame's pixel data was being handled inside the Rust pipeline, the blending logic was moved entirely to the JavaScript `useVideoProcessor.ts` hook. The `postprocess_frame` function's sole responsibility is to convert the model's output tensor into a valid, unblended RGBA image. The final alpha blending is then performed efficiently on the 2D canvas context in the browser.

@@ -126,26 +126,11 @@ pub fn postprocess_image(
 
 pub fn postprocess_video_frame(
     output_tensor: Vec<f32>,
-    original_frame_pixels: &[u8],
     width: u32,
     height: u32,
-    strength: f32,
 ) -> Result<Vec<u8>, ImageError> {
     let stylized_img = tensor_to_image(output_tensor, width, height)?;
-    
-    let original_frame_buffer = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, original_frame_pixels.to_vec())
-        .ok_or_else(|| ImageError::Processing("Failed to create ImageBuffer from raw pixels".to_string()))?;
-    let original_frame = DynamicImage::ImageRgba8(original_frame_buffer);
-
-    let mut output_img = ImageBuffer::new(width, height);
-
-    for (x, y, stylized_pixel) in stylized_img.enumerate_pixels() {
-        let original_pixel = original_frame.get_pixel(x, y);
-        let blended_pixel = blend_pixels(original_pixel, *stylized_pixel, strength);
-        output_img.put_pixel(x, y, blended_pixel);
-    }
-
-    Ok(output_img.into_raw())
+    Ok(stylized_img.into_raw())
 }
 
 fn tensor_to_image(

@@ -149,16 +149,12 @@ export function postprocess(output_tensor, original_image_bytes, width, height, 
 
 /**
  * @param {Float32Array} output_tensor
- * @param {Uint8Array} original_frame_pixels
  * @param {number} width
  * @param {number} height
- * @param {number} strength
  * @returns {Uint8Array}
  */
-export function postprocess_frame(output_tensor, original_frame_pixels, width, height, strength) {
-    const ptr0 = passArray8ToWasm0(original_frame_pixels, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.postprocess_frame(output_tensor, ptr0, len0, width, height, strength);
+export function postprocess_frame(output_tensor, width, height) {
+    const ret = wasm.postprocess_frame(output_tensor, width, height);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }

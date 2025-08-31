@@ -33,10 +33,10 @@ pub fn postprocess(output_tensor: Float32Array, original_image_bytes: &[u8], wid
 }
 
 #[wasm_bindgen]
-pub fn postprocess_frame(output_tensor: Float32Array, original_frame_pixels: &[u8], width: u32, height: u32, strength: f32) -> Result<Uint8Array, JsValue> {
+pub fn postprocess_frame(output_tensor: Float32Array, width: u32, height: u32) -> Result<Uint8Array, JsValue> {
     console_error_panic_hook::set_once();
     let output_vec = output_tensor.to_vec();
-    let result_rgba = postprocess_video_frame(output_vec, original_frame_pixels, width, height, strength).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let result_rgba = postprocess_video_frame(output_vec, width, height).map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(Uint8Array::from(result_rgba.as_slice()))
 }
 
