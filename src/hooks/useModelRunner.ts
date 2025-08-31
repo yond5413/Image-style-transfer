@@ -1,3 +1,4 @@
+import { easeInOutCubic } from '@/lib/utils';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { InferenceSession, Tensor } from 'onnxruntime-web';
 import * as ort from 'onnxruntime-web';
@@ -25,6 +26,8 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
   const [models, setModels] = useState<ModelManifestEntry[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [styleStrength, setStyleStrength] = useState(0.8);
+  const [displayStrength, setDisplayStrength] = useState(styleStrength);
+  const strengthRef = useRef(displayStrength);
   const outputCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const wasmRef = useRef<any>(null);
   // New state for execution providers
@@ -65,6 +68,8 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
     loadWasmAndModels();
   }, []); // Empty dependency array to run once on mount
 
+  const [isModelLoading, setIsModelLoading] = useState(false);
+
   const createSession = useCallback(async (modelId: string) => {
     let currentSession = sessionCache[modelId];
     if (currentSession) {
@@ -74,28 +79,37 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
       return currentSession;
     }
 
+    setIsModelLoading(true);
     const modelData = models.find(m => m.id === modelId);
     if (!modelData) {
       setStatus(`Model ${modelId} not found`);
+      setIsModelLoading(false);
       return null;
     }
 
     setStatus(`Loading ${modelData.name} model...`);
-    const modelFile = modelData.file;
-    ort.env.wasm.wasmPaths = '/';
-    // Use the determined executionProviders
-    currentSession = await InferenceSession.create(modelFile, { executionProviders: onnxExecutionProviders });
+    try {
+      const modelFile = modelData.file;
+      ort.env.wasm.wasmPaths = '/';
+      currentSession = await InferenceSession.create(modelFile, { executionProviders: onnxExecutionProviders });
 
-    setStatus(`Warming up ${modelData.name} model...`);
-    const modelShape = modelData.input.shape;
-    const dummyInput = new Tensor('float32', new Float32Array(modelShape[1] * modelShape[2] * modelShape[3]), modelShape);
-    const inputName = currentSession.inputNames[0];
-    const feeds = { [inputName]: dummyInput };
-    await currentSession.run(feeds);
+      setStatus(`Warming up ${modelData.name} model...`);
+      const modelShape = modelData.input.shape;
+      const dummyInput = new Tensor('float32', new Float32Array(modelShape[1] * modelShape[2] * modelShape[3]), modelShape);
+      const inputName = currentSession.inputNames[0];
+      const feeds = { [inputName]: dummyInput };
+      await currentSession.run(feeds);
 
-    setSessionCache(prev => ({ ...prev, [modelId]: currentSession }));
-    setSession(currentSession);
-    setStatus(`Model ${modelData.name} loaded`);
+      setSessionCache(prev => ({ ...prev, [modelId]: currentSession }));
+      setSession(currentSession);
+      setStatus(`Model ${modelData.name} loaded`);
+    } catch (e) {
+      console.error("Failed to create session", e);
+      setStatus("Failed to load model.");
+    } finally {
+      setIsModelLoading(false);
+    }
+
     return currentSession;
   }, [models, session, sessionCache, setSession, setSessionCache, setStatus, onnxExecutionProviders]);
 
@@ -105,11 +119,37 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
     }
   }, [selectedModelId, createSession]);
 
+  useEffect(() => {
+    strengthRef.current = displayStrength;
+  }, [displayStrength]);
+
+  useEffect(() => {
+    const animationDuration = 200; // ms
+    let startTime: number;
+    const startStrength = displayStrength;
+
+    const animate = (currentTime: number) => {
+      if (!startTime) startTime = currentTime;
+      const elapsedTime = currentTime - startTime;
+      const progress = Math.min(elapsedTime / animationDuration, 1);
+      const easedProgress = easeInOutCubic(progress);
+
+      const newStrength = startStrength + (styleStrength - startStrength) * easedProgress;
+      setDisplayStrength(newStrength);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, [styleStrength]); // This effect runs when the target strength changes
+
   const runInferenceOnImage = useCallback(async (imageBytes: ArrayBuffer) => {
-    if (!wasmRef.current || !selectedModelId) return;
+    if (!wasmRef.current || !selectedModelId || isModelLoading) return;
 
     try {
-      const currentSession = await createSession(selectedModelId);
+      const currentSession = session;
       if (!currentSession) return;
 
       const modelData = models.find(m => m.id === selectedModelId)!;
@@ -128,7 +168,7 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
       const newOutputTensor = results[outputName];
 
       setStatus("Postprocessing...");
-      const pixelData = wasmRef.current.postprocess(newOutputTensor.data, new Uint8Array(imageBytes), modelWidth, modelHeight, styleStrength);
+      const pixelData = wasmRef.current.postprocess(newOutputTensor.data, new Uint8Array(imageBytes), modelWidth, modelHeight, strengthRef.current);
 
       setStatus("Done!");
       const outputCanvas = outputCanvasRef.current;
@@ -165,16 +205,15 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
         setStatus(`Error: An unknown error occurred`);
       }
     }
-  }, [createSession, selectedModelId, styleStrength, models, setStatus, originalCanvasRef]);
+  }, [session, selectedModelId, models, setStatus, originalCanvasRef, isModelLoading]);
 
   const runInferenceOnFrame = useCallback(async (canvas: HTMLCanvasElement) => {
-    if (!wasmRef.current || !selectedModelId) {
+    if (!wasmRef.current || !selectedModelId || isModelLoading || !session) {
       return;
     }
 
     try {
-      const currentSession = await createSession(selectedModelId);
-      if (!currentSession) return;
+      const currentSession = session;
 
       const modelData = models.find(m => m.id === selectedModelId)!;
       const modelShape = modelData.input.shape;
@@ -194,7 +233,7 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
       const outputName = currentSession.outputNames[0];
       const newOutputTensor = results[outputName];
 
-      const pixelData = wasmRef.current.postprocess_frame(newOutputTensor.data, new Uint8Array(framePixelData), modelWidth, modelHeight, styleStrength);
+      const pixelData = wasmRef.current.postprocess_frame(newOutputTensor.data, new Uint8Array(framePixelData), modelWidth, modelHeight, strengthRef.current);
 
       return new ImageData(new Uint8ClampedArray(pixelData), modelWidth, modelHeight);
     } catch (e: unknown) {
@@ -206,25 +245,26 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
         setStatus(`Error: An unknown error occurred`);
       }
     }
-  }, [createSession, selectedModelId, styleStrength, models, setStatus]);
+  }, [session, selectedModelId, models, setStatus, isModelLoading]);
 
   const handleStyleChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedModelId(event.target.value);
   }, []);
 
-  const handleStrengthChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    setStyleStrength(parseFloat(event.target.value));
+  const handleStrengthChange = useCallback((value: number[]) => {
+    setStyleStrength(value[0]);
   }, []);
 
   return {
     status,
     models,
     selectedModelId,
-    styleStrength,
+    styleStrength: displayStrength,
     outputCanvasRef,
     handleStyleChange,
     handleStrengthChange,
     runInferenceOnImage,
-    runInferenceOnFrame
+    runInferenceOnFrame,
+    isModelLoading
   };
 }

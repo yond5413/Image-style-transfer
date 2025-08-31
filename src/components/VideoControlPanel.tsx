@@ -1,4 +1,5 @@
 import React from 'react';
+import { Slider } from '@/components/ui/slider';
 
 interface ModelManifestEntry {
   id: string;
@@ -11,7 +12,7 @@ interface VideoControlPanelProps {
   styleStrength: number;
   isWebcamOn: boolean;
   handleStyleChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
-  handleStrengthChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  handleStrengthChange: (value: number[]) => void;
   handleWebcam: () => void;
 }
 
@@ -42,14 +43,13 @@ export function VideoControlPanel({
 
       <div className="w-full mt-4">
         <label htmlFor="styleStrength" className="block text-center mb-2">Style Strength: {styleStrength.toFixed(2)}</label>
-        <input
+        <Slider
           id="styleStrength"
-          type="range"
-          min="0"
-          max="1"
-          step="0.05"
-          value={styleStrength}
-          onChange={handleStrengthChange}
+          min={0}
+          max={1}
+          step={0.05}
+          value={[styleStrength]}
+          onValueChange={handleStrengthChange}
           className="w-full"
           disabled={!isWebcamOn}
         />

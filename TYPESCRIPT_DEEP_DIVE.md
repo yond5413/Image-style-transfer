@@ -155,61 +155,123 @@ try {
 
 **Future Improvement**: A more robust solution would involve a dedicated error state (e.g., `const [error, setError] = useState<string | null>(null);`) and displaying a user-friendly toast notification or message in the UI when an error occurs.
 
----
+--- 
 
-## 4. Real-time Video vs. Single Image Processing
+## 4. `useWebcam.ts`: Encapsulating Real-time Video Logic
 
-While the core style transfer logic is similar, processing a real-time video stream has unique constraints and a different implementation path compared to processing a single static image.
+Processing a real-time video stream is fundamentally different from processing a single image. To handle this complexity cleanly, all video-related logic is encapsulated in the `useWebcam.ts` hook.
 
-### The Video Loop: `requestAnimationFrame`
+### Design Rationale
 
-For video, we don't have a single `ArrayBuffer` to process. Instead, we have a continuous stream of frames from the webcam. The processing of this stream is handled by a rendering loop created with `requestAnimationFrame`.
+Previously, the video processing loop and webcam state were managed directly within the `video/page.tsx` component using multiple `useEffect` hooks. This led to several problems:
+-   **Complex State Management**: `isVideoRunning`, the `MediaStream` object, and the `requestAnimationFrame` ID were all managed separately.
+-   **Resource Leaks**: It was difficult to ensure that the camera stream and the animation loop were always cleaned up correctly.
+-   **Poor Separation of Concerns**: The main page component was cluttered with low-level video processing logic.
+
+The `useWebcam` hook solves these problems by creating a single, self-contained unit for all video functionality.
+
+### How It Works
+
+The hook is instantiated in `video/page.tsx` like this:
 
 ```typescript
-const videoLoop = async () => {
-  if (isVideoRunning) {
-    // ... drawing and inference logic ...
-    requestAnimationFrame(videoLoop);
+const {
+  isVideoRunning,
+  videoRef,
+  startWebcam,
+  stopWebcam,
+} = useWebcam(model.runInferenceOnFrame, outputCanvasRef);
+```
+
+-   **Arguments**: It takes two arguments:
+    1.  `runInference`: A callback function that will be executed on each video frame. In our case, we pass `model.runInferenceOnFrame` from the `useModelRunner` hook.
+    2.  `outputCanvasRef`: A ref to the canvas where the final stylized video should be drawn.
+-   **Return Values**: It returns an object containing:
+    -   `isVideoRunning`: A boolean state variable indicating if the webcam is active.
+    -   `videoRef`: A ref to be attached to the `<video>` element.
+    -   `startWebcam`: A function to start the webcam.
+    -   `stopWebcam`: A function to gracefully stop the webcam and clean up all resources.
+
+### The Video Loop: `videoLoop`
+
+The core of the hook is the `videoLoop` function, which is powered by `requestAnimationFrame`.
+
+```typescript
+const videoLoop = useCallback(async () => {
+  if (videoRef.current && videoRef.current.readyState >= 3 && outputCanvasRef.current) {
+    // 1. Draw current video frame to a temporary canvas
+    // ...
+    
+    // 2. Run inference on the temporary canvas
+    const outputImageData = await runInference(tempCanvas);
+    
+    // 3. Draw the stylized result to the output canvas
+    if (outputImageData) {
+      // ... drawing logic ...
+    }
   }
-};
+  // 4. Schedule the next frame
+  requestRef.current = requestAnimationFrame(videoLoop);
+}, [runInference, outputCanvasRef]);
 ```
 
--   **Why `requestAnimationFrame`?** This is the browser's native and most efficient way to run animations or rendering loops. It tells the browser that you wish to perform an animation and requests that the browser call a specified function to update an animation before the next repaint. This has several advantages over a `setInterval` loop:
-    -   **Efficiency**: The browser can optimize performance and battery life by grouping animations together.
-    -   **Backpressure**: If the browser tab is in the background, the loop will be paused, saving system resources.
-    -   **Smoothness**: It's synchronized with the browser's repaint cycle, leading to smoother animations.
+This loop continuously:
+1.  Captures the current frame from the `<video>` element.
+2.  Calls the `runInference` function that was passed in as an argument.
+3.  Draws the resulting `ImageData` to the output canvas.
+4.  Schedules itself to be called again on the next animation frame.
 
-### The Video Inference Pipeline: `runInferenceOnFrame`
+### Graceful Shutdown: `stopWebcam`
 
-Inside the `videoLoop`, the `runInferenceOnFrame` function is called. It differs from `runInferenceOnImage` in several key ways:
+The `stopWebcam` function is critical for preventing resource leaks.
 
 ```typescript
-const runInferenceOnFrame = useCallback(async (canvas: HTMLCanvasElement) => {
-  // 1. Get pixel data from the canvas
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  const framePixelData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+const stopWebcam = useCallback(() => {
+  // 1. Stop the animation loop
+  if (requestRef.current) {
+    cancelAnimationFrame(requestRef.current);
+  }
+  
+  // 2. Update the state
+  setIsVideoRunning(false);
+  
+  // 3. Stop the camera hardware track
+  if (videoRef.current && videoRef.current.srcObject) {
+    const stream = videoRef.current.srcObject as MediaStream;
+    stream.getTracks().forEach(track => track.stop());
+    videoRef.current.srcObject = null;
+  }
+}, []);
+```
+This function ensures that both the animation loop is cancelled and, most importantly, the browser is instructed to release the camera hardware (`track.stop()`). This turns off the camera light and frees up the device for other applications.
 
-  // 2. Pre-process the frame in WebAssembly
-  const tensor = wasmRef.current.preprocess_frame(new Uint8Array(framePixelData), ...);
+### Solving Stale Closures with `useRef`
 
-  // 3. Run the model
-  // ... (similar to runInferenceOnImage) ...
+A critical challenge in the `useWebcam` hook is ensuring the `videoLoop` always calls the *latest* version of the `runInference` function. When the user selects a new model, the `useModelRunner` hook creates a new `runInferenceOnFrame` function with the new model's session in its closure.
 
-  // 4. Post-process the frame in WebAssembly
-  const pixelData = wasmRef.current.postprocess_frame(newOutputTensor.data, ...);
+**The Problem:** The `videoLoop` is wrapped in a `useCallback` for performance. If we include `runInference` in its dependency array, the loop itself gets recreated frequently, which is not ideal. However, if we *don't* include it, the `videoLoop` holds a "stale" reference to the very first `runInference` function it received, and it never gets the new one when the model changes.
 
-  // 5. Return the final ImageData
-  return new ImageData(new Uint8ClampedArray(pixelData), modelWidth, modelHeight);
-}, [/* dependencies */]);
+**The Solution:** We use a `useRef` to act as a stable "box" for the `runInference` function.
+
+```typescript
+// In useWebcam.ts
+
+// ...
+const runInferenceRef = useRef(runInference);
+
+useEffect(() => {
+  runInferenceRef.current = runInference;
+}, [runInference]);
+
+const videoLoop = useCallback(async () => {
+  // ...
+  const outputImageData = await runInferenceRef.current(tempCanvas);
+  // ...
+}, [outputCanvasRef, isModelLoading]); // Note: runInference is NOT in the dependency array
 ```
 
-1.  **Input Source**: The input is not an `ArrayBuffer` of a file. Instead, it's the raw pixel data (`Uint8Array`) obtained by calling `ctx.getImageData()` on a canvas that is displaying the current video frame.
-2.  **Dedicated WASM Functions**: It calls `preprocess_frame` and `postprocess_frame` in the Rust/WASM module. These functions are optimized for working with raw pixel data directly, bypassing the need for image decoding.
-3.  **Return Value**: It returns the final `ImageData` object directly, which is then drawn to the output canvas by the `videoLoop`.
+1.  **`runInferenceRef`**: A `ref` is created to hold the `runInference` function.
+2.  **`useEffect`**: This effect runs whenever the `runInference` prop changes (i.e., when a new model is loaded). It updates the `.current` property of the ref to point to the latest function.
+3.  **`videoLoop`**: The loop itself is now only created once (its dependencies rarely change). On every frame, it calls `runInferenceRef.current()`. This ensures it always executes the most up-to-date version of the inference function, correctly applying the newly selected model's style without needing to restart the webcam.
 
-### Performance Considerations for Real-time Video
-
--   **Frame Rate vs. Processing Time**: The goal is to have the entire `runInferenceOnFrame` pipeline execute faster than the time between frames (e.g., < 33ms for 30 FPS).
--   **Frame Skipping**: If the processing of a frame takes too long, the `requestAnimationFrame` loop will naturally "skip" the next frame. For example, if one frame takes 50ms to process, we miss the 33ms target, and the next frame will be processed when the system is ready. This prevents a backlog of frames from building up and crashing the application.
--   **Resolution is Key**: The most significant factor for achieving real-time performance is the resolution of the video stream being processed. The webcam feed is often processed at a much lower resolution (e.g., 256x256 or 384x384) than a static image to ensure the pipeline can run fast enough.
+This pattern is a standard and highly effective way to handle callbacks that change over time within a long-running `useCallback` or `useEffect` hook.

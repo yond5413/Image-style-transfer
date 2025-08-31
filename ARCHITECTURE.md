@@ -57,6 +57,15 @@ This hook manages the user's input image.
 -   **Performance Consideration**: It resizes large images before drawing them to the canvas (`MAX_CANVAS_SIZE`).
     -   **Why?** This prevents very large images from consuming excessive memory and slowing down the initial processing steps. The resizing is done on the display canvas, not the underlying data that gets sent to the model.
 
+### `useWebcam.ts`: Real-time Video Handling
+
+This hook encapsulates the complex logic of managing the webcam stream and the real-time processing loop.
+
+-   **Design Rationale**: Previously, the video logic was handled inside the main `video/page.tsx` component, leading to complex `useEffect` hooks and difficult state management. By extracting this into a dedicated hook, we achieve:
+    -   **Separation of Concerns**: The `video/page.tsx` component is now only responsible for layout and passing props.
+    -   **Improved State Management**: The `isVideoRunning` state and the `requestAnimationFrame` loop are managed within the hook, preventing unnecessary re-renders of the main component.
+    -   **Resource Management**: The `stopWebcam` function provides a single, reliable place to handle the cleanup of all video-related resources (media stream, animation frame), preventing resource leaks.
+
 ---
 
 ## 4. Backend Architecture (`/rust`)
