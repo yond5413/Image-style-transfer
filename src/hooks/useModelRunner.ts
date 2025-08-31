@@ -26,8 +26,7 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
   const [models, setModels] = useState<ModelManifestEntry[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [styleStrength, setStyleStrength] = useState(0.8);
-  const [displayStrength, setDisplayStrength] = useState(styleStrength);
-  const strengthRef = useRef(displayStrength);
+  const strengthRef = useRef(styleStrength);
   const outputCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const wasmRef = useRef<any>(null);
   // New state for execution providers
@@ -120,30 +119,8 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
   }, [selectedModelId, createSession]);
 
   useEffect(() => {
-    strengthRef.current = displayStrength;
-  }, [displayStrength]);
-
-  useEffect(() => {
-    const animationDuration = 200; // ms
-    let startTime: number;
-    const startStrength = displayStrength;
-
-    const animate = (currentTime: number) => {
-      if (!startTime) startTime = currentTime;
-      const elapsedTime = currentTime - startTime;
-      const progress = Math.min(elapsedTime / animationDuration, 1);
-      const easedProgress = easeInOutCubic(progress);
-
-      const newStrength = startStrength + (styleStrength - startStrength) * easedProgress;
-      setDisplayStrength(newStrength);
-
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      }
-    };
-
-    requestAnimationFrame(animate);
-  }, [styleStrength]); // This effect runs when the target strength changes
+    strengthRef.current = styleStrength;
+  }, [styleStrength]);
 
   const runInferenceOnImage = useCallback(async (imageBytes: ArrayBuffer) => {
     if (!wasmRef.current || !selectedModelId || isModelLoading) return;
@@ -259,7 +236,7 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
     status,
     models,
     selectedModelId,
-    styleStrength: displayStrength,
+    styleStrength,
     outputCanvasRef,
     handleStyleChange,
     handleStrengthChange,
