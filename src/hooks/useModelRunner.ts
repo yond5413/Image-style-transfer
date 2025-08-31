@@ -27,12 +27,17 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
   const [styleStrength, setStyleStrength] = useState(0.8);
   const outputCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const wasmRef = useRef<any>(null);
+  // New state for execution providers
+  const [onnxExecutionProviders, setOnnxExecutionProviders] = useState<string[]>(['wasm']);
 
   useEffect(() => {
-    if (!(navigator as any).gpu) {
-      console.error("WebGPU not supported on this browser!");
-      setStatus("WebGPU not supported!");
-      return;
+    if ((navigator as any).gpu) {
+      console.log("WebGPU is supported.");
+      setOnnxExecutionProviders(['webgpu', 'wasm']);
+    } else {
+      console.warn("WebGPU not supported on this browser. Falling back to WebGL/WASM.");
+      setOnnxExecutionProviders(['webgl', 'wasm']);
+      setStatus("WebGPU not supported. Using WebGL/WASM fallback.");
     }
 
     async function loadWasmAndModels() {
@@ -58,7 +63,7 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
       }
     }
     loadWasmAndModels();
-  }, []);
+  }, []); // Empty dependency array to run once on mount
 
   const createSession = useCallback(async (modelId: string) => {
     let currentSession = sessionCache[modelId];
@@ -78,7 +83,8 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
     setStatus(`Loading ${modelData.name} model...`);
     const modelFile = modelData.file;
     ort.env.wasm.wasmPaths = '/';
-    currentSession = await InferenceSession.create(modelFile, { executionProviders: ['webgpu', 'wasm'] });
+    // Use the determined executionProviders
+    currentSession = await InferenceSession.create(modelFile, { executionProviders: onnxExecutionProviders });
 
     setStatus(`Warming up ${modelData.name} model...`);
     const modelShape = modelData.input.shape;
@@ -91,7 +97,7 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
     setSession(currentSession);
     setStatus(`Model ${modelData.name} loaded`);
     return currentSession;
-  }, [models, session, sessionCache, setSession, setSessionCache, setStatus]);
+  }, [models, session, sessionCache, setSession, setSessionCache, setStatus, onnxExecutionProviders]);
 
   useEffect(() => {
     if (selectedModelId) {

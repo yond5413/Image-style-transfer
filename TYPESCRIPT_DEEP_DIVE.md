@@ -1,16 +1,22 @@
-# TypeScript Deep Dive
+# TypeScript Deep Dive (Enhanced)
 
-This document provides a detailed walkthrough of the TypeScript and React code, explaining the role of each component, hook, and the data flow between them.
+This document provides a highly detailed walkthrough of the TypeScript and React codebase. It is intended for new developers to get up to speed with the frontend architecture, data flow, and design patterns.
 
-## 1. Composition Root: `src/app/image/page.tsx`
+## 1. Data Flow and State Management
 
-This component is the entry point and the "composition root" of the application. It is responsible for:
+The application follows a unidirectional data flow pattern.
 
-1.  **Instantiating Hooks**: It calls `useImageUploader()` and `useModelRunner()` to create instances of our core logic controllers.
-2.  **State Management**: It holds the application state returned from the hooks and passes it down to the presentational components as props.
-3.  **Layout**: It arranges the `ImageControlPanel` and `CanvasDisplay` components on the page.
+```
+[Hooks] -> [Page Component] -> [Presentational Components]
+```
 
-By keeping the main page component focused on composition, we make the overall architecture cleaner and easier to refactor.
+1.  **Hooks (`useImageUploader`, `useModelRunner`)**: Contain all the business logic, state variables, and state-mutating functions. They are completely independent of the UI.
+2.  **Page Component (`/image/page.tsx`)**: Acts as a "Composition Root". It calls the hooks, receives state and functions from them, and passes them down as props to the UI components. It does not contain any business logic itself.
+3.  **Presentational Components (`ImageControlPanel`, `CanvasDisplay`)**: These are "dumb" components. They only receive props and render UI. They call functions passed down in props to signal user interactions.
+
+This separation of concerns makes the code highly modular and easy to test and refactor.
+
+---
 
 ## 2. `useImageUploader.ts`: Managing the Input Image
 
@@ -18,58 +24,192 @@ This hook encapsulates all logic related to the user's uploaded image.
 
 ### State Variables
 
--   `originalImageBytes: ArrayBuffer | null`: Stores the raw binary data of the user's image. This is passed to the WASM module for processing.
--   `originalImageUrl: string | null`: A URL created via `URL.createObjectURL()`. This is used to efficiently display the uploaded image without needing to convert the `ArrayBuffer` back to an image format in JavaScript.
--   `fileName: string | null`: The name of the uploaded file, displayed in the UI.
--   `originalCanvasRef: RefObject<HTMLCanvasElement>`: A ref to the canvas element that displays the original image.
+```typescript
+const [originalImageBytes, setOriginalImageBytes] = useState<ArrayBuffer | null>(null);
+const [originalImageUrl, setOriginalImageUrl] = useState<string | null>(null);
+const [fileName, setFileName] = useState<string | null>(null);
+const originalCanvasRef = useRef<HTMLCanvasElement | null>(null);
+```
+
+-   `originalImageBytes`: The raw `ArrayBuffer` of the image. This is the "source of truth" that is sent to the backend for processing.
+-   `originalImageUrl`: A temporary URL created by the browser (`blob:...`). This is a performance optimization to avoid converting the `ArrayBuffer` to a displayable format in JS.
+-   `fileName`: The name of the user's file, for display purposes.
+-   `originalCanvasRef`: A React `ref` to the `<canvas>` element. We use a ref to gain direct access to the canvas API for drawing.
 
 ### Core Logic: `handleImageUpload`
 
-This function is triggered by the `<input type="file">` element. Here is its step-by-step execution:
+This function is a great example of asynchronous browser APIs working together.
 
-1.  **Get File**: It retrieves the `File` object from the input event.
-2.  **Read as ArrayBuffer**: It uses a `FileReader` to read the file as an `ArrayBuffer`. The result is stored in `originalImageBytes`.
-3.  **Create Object URL**: Simultaneously, `URL.createObjectURL()` is called on the `File` object to create a temporary, in-memory URL. This is stored in `originalImageUrl`.
-4.  **Draw to Canvas**: An `Image` element is created in memory with the object URL as its source. In the `onload` callback, the image is drawn to the `originalCanvasRef`. During this step, the image is scaled down if it exceeds `MAX_CANVAS_SIZE` to maintain UI performance.
+```typescript
+const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  setFileName(file.name);
+
+  // 1. Read the file as an ArrayBuffer
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const arrayBuffer = e.target?.result as ArrayBuffer;
+    if (!arrayBuffer) return;
+
+    // 2. Create a display URL and draw to canvas
+    const imageUrl = URL.createObjectURL(file);
+    setOriginalImageBytes(arrayBuffer);
+    setOriginalImageUrl(imageUrl);
+
+    const img = new Image();
+    img.src = imageUrl;
+    img.onload = () => {
+      // ... drawing logic ...
+    };
+  };
+  reader.readAsArrayBuffer(file);
+};
+```
+
+1.  **`FileReader`**: This is the standard browser API for reading files. We use `readAsArrayBuffer` because that's the format our WASM module expects. The result is delivered asynchronously via the `onload` callback.
+2.  **`URL.createObjectURL`**: This is a highly efficient way to create a temporary, in-memory URL that refers to the `File` object. It's much faster than, for example, creating a base64 data URL. The browser handles the memory management for this URL.
+
+---
 
 ## 3. `useModelRunner.ts`: The Inference Engine
 
-This is the heart of the application, orchestrating the ML model, the WASM module, and the user's selections.
+This is the most complex part of the frontend. It manages the ML session, the WASM module, and the inference pipeline.
 
-### State Variables
+### Initialization and WASM Loading
 
--   `session: InferenceSession | null`: The active ONNX Runtime inference session.
--   `sessionCache: Record<string, InferenceSession>`: An in-memory cache (a simple object) to store previously created sessions.
--   `status: string`: A user-facing status message (e.g., "Loading model...", "Running inference...").
--   `models: ModelManifestEntry[]`: An array of available models, loaded from `public/models/manifest.json`.
--   `selectedModelId: string | null`: The ID of the currently selected style.
--   `styleStrength: number`: The current value of the blending slider (0.0 to 1.0).
--   `outputCanvasRef: RefObject<HTMLCanvasElement>`: A ref to the canvas that displays the stylized image.
--   `wasmRef: RefObject<any>`: A ref to hold the loaded WebAssembly module.
+```typescript
+useEffect(() => {
+  // ... WebGPU detection ...
 
-### Initialization: `useEffect`
+  async function loadWasmAndModels() {
+    try {
+      // Dynamically import the WASM package
+      const wasm = await import("../wasm/pkg");
+      await wasm.default(); // Initialize the wasm module
+      wasmRef.current = wasm;
 
-On the initial component mount, a `useEffect` hook performs the following setup:
+      // ... fetch manifest ...
+    } catch (e) {
+      // ... error handling ...
+    }
+  }
+  loadWasmAndModels();
+}, []);
+```
 
-1.  **Detects WebGPU**: It checks for `navigator.gpu` to determine if WebGPU is available.
-2.  **Loads WASM**: It dynamically imports the WASM package from `/src/wasm/pkg`.
-3.  **Fetches Manifest**: It fetches `/models/manifest.json` to populate the list of available styles.
+-   **Dynamic `import()`**: The `import("../wasm/pkg")` call is crucial. It tells the bundler (Next.js/Webpack) to split the WASM code into a separate chunk. This chunk is loaded asynchronously, so it doesn't block the initial rendering of the page.
+-   `wasm.default()`: The `wasm-pack` build process generates a default export that is an async function. This function must be called to initialize the WebAssembly module and its memory.
 
-### Core Logic: `createSession` and `runInferenceOnImage`
+### The Inference Pipeline: `runInferenceOnImage`
 
-**`createSession(modelId)`**
+This function is the core data processing pipeline. Here is a line-by-line breakdown:
 
-1.  **Check Cache**: It first checks if a session for the given `modelId` already exists in `sessionCache`. If so, it returns the cached session immediately.
-2.  **Create Session**: If not cached, it calls `InferenceSession.create()`, passing the model's `.onnx` file path and the chosen execution provider (`webgpu` or `webgl`).
-3.  **Warm-up**: After creating the session, it performs a single "warm-up" run with a dummy tensor of zeros. **This is a critical performance optimization.** It forces the GPU to compile the necessary shaders for the model *before* the user runs their first real inference, preventing a long delay on the first stylization.
-4.  **Update Cache**: The newly created session is stored in `sessionCache`.
+```typescript
+const runInferenceOnImage = useCallback(async (imageBytes: ArrayBuffer) => {
+  // 1. Ensure the model session is ready
+  const currentSession = await createSession(selectedModelId);
+  if (!currentSession) return;
 
-**`runInferenceOnImage(imageBytes)`**
+  // 2. Pre-process the image in WebAssembly
+  setStatus("Preprocessing...");
+  const tensor = wasmRef.current.preprocess(new Uint8Array(imageBytes), modelWidth, modelHeight);
 
-This function is the main pipeline, executed in a clear sequence:
+  // 3. Run the model on the GPU
+  setStatus("Running inference...");
+  const inputName = currentSession.inputNames[0];
+  const feeds = { [inputName]: new Tensor('float32', tensor, modelShape) };
+  const results = await currentSession.run(feeds);
+  const newOutputTensor = results[currentSession.outputNames[0]];
 
-1.  `await createSession(selectedModelId)`: Ensures the correct model is loaded and ready.
-2.  `wasmRef.current.preprocess(...)`: Calls the Rust/WASM function, passing the image data. The result is a `Float32Array` tensor.
-3.  `session.run(...)`: Executes the ONNX model on the GPU, feeding it the tensor from the previous step.
-4.  `wasmRef.current.postprocess(...)`: Calls the Rust/WASM function with the model's output tensor and the original image data for blending.
-5.  `outputCtx.drawImage(...)`: The final `ImageData` is drawn to the output canvas. It uses an intermediate temporary canvas to correctly handle resizing the model's output to match the original image's aspect ratio, preventing distortion.
+  // 4. Post-process the result in WebAssembly
+  setStatus("Postprocessing...");
+  const pixelData = wasmRef.current.postprocess(newOutputTensor.data, new Uint8Array(imageBytes), modelWidth, modelHeight, styleStrength);
+
+  // 5. Render the final image to the canvas
+  setStatus("Done!");
+  // ... canvas drawing logic ...
+}, [/* dependencies */]);
+```
+
+1.  **Get Session**: It calls `createSession` which either retrieves a cached session or creates and warms up a new one. This is `await`ed to ensure we don't proceed without a valid session.
+2.  **Pre-process (JS -> WASM)**: The `imageBytes` (`ArrayBuffer`) is wrapped in a `Uint8Array` view (this is a zero-copy operation) and passed to the `preprocess` function in our Rust/WASM module. The return value is a `Float32Array` tensor, ready for the model.
+3.  **Inference (GPU)**: A `feeds` object is created to map the input name of the model to our tensor. `session.run()` uploads the tensor to the GPU, executes the model, and returns the result tensor. This is the most computationally expensive step.
+4.  **Post-process (WASM -> JS)**: The output tensor data (`newOutputTensor.data`) is passed *back* to our WASM module, along with the original image (for blending) and the style strength. The WASM module returns the final `Uint8ClampedArray` of pixel data.
+5.  **Render**: The `pixelData` is used to create an `ImageData` object, which is then efficiently drawn to the output canvas.
+
+### Error Handling
+
+Currently, errors within the pipeline are caught by a `try...catch` block and logged to the console.
+
+```typescript
+try {
+  // ... inference pipeline ...
+} catch (e: unknown) {
+  if (e instanceof Error) {
+    console.error(e.message);
+    setStatus(`Error: ${e.message}`);
+  } // ...
+}
+```
+
+**Future Improvement**: A more robust solution would involve a dedicated error state (e.g., `const [error, setError] = useState<string | null>(null);`) and displaying a user-friendly toast notification or message in the UI when an error occurs.
+
+---
+
+## 4. Real-time Video vs. Single Image Processing
+
+While the core style transfer logic is similar, processing a real-time video stream has unique constraints and a different implementation path compared to processing a single static image.
+
+### The Video Loop: `requestAnimationFrame`
+
+For video, we don't have a single `ArrayBuffer` to process. Instead, we have a continuous stream of frames from the webcam. The processing of this stream is handled by a rendering loop created with `requestAnimationFrame`.
+
+```typescript
+const videoLoop = async () => {
+  if (isVideoRunning) {
+    // ... drawing and inference logic ...
+    requestAnimationFrame(videoLoop);
+  }
+};
+```
+
+-   **Why `requestAnimationFrame`?** This is the browser's native and most efficient way to run animations or rendering loops. It tells the browser that you wish to perform an animation and requests that the browser call a specified function to update an animation before the next repaint. This has several advantages over a `setInterval` loop:
+    -   **Efficiency**: The browser can optimize performance and battery life by grouping animations together.
+    -   **Backpressure**: If the browser tab is in the background, the loop will be paused, saving system resources.
+    -   **Smoothness**: It's synchronized with the browser's repaint cycle, leading to smoother animations.
+
+### The Video Inference Pipeline: `runInferenceOnFrame`
+
+Inside the `videoLoop`, the `runInferenceOnFrame` function is called. It differs from `runInferenceOnImage` in several key ways:
+
+```typescript
+const runInferenceOnFrame = useCallback(async (canvas: HTMLCanvasElement) => {
+  // 1. Get pixel data from the canvas
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const framePixelData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+  // 2. Pre-process the frame in WebAssembly
+  const tensor = wasmRef.current.preprocess_frame(new Uint8Array(framePixelData), ...);
+
+  // 3. Run the model
+  // ... (similar to runInferenceOnImage) ...
+
+  // 4. Post-process the frame in WebAssembly
+  const pixelData = wasmRef.current.postprocess_frame(newOutputTensor.data, ...);
+
+  // 5. Return the final ImageData
+  return new ImageData(new Uint8ClampedArray(pixelData), modelWidth, modelHeight);
+}, [/* dependencies */]);
+```
+
+1.  **Input Source**: The input is not an `ArrayBuffer` of a file. Instead, it's the raw pixel data (`Uint8Array`) obtained by calling `ctx.getImageData()` on a canvas that is displaying the current video frame.
+2.  **Dedicated WASM Functions**: It calls `preprocess_frame` and `postprocess_frame` in the Rust/WASM module. These functions are optimized for working with raw pixel data directly, bypassing the need for image decoding.
+3.  **Return Value**: It returns the final `ImageData` object directly, which is then drawn to the output canvas by the `videoLoop`.
+
+### Performance Considerations for Real-time Video
+
+-   **Frame Rate vs. Processing Time**: The goal is to have the entire `runInferenceOnFrame` pipeline execute faster than the time between frames (e.g., < 33ms for 30 FPS).
+-   **Frame Skipping**: If the processing of a frame takes too long, the `requestAnimationFrame` loop will naturally "skip" the next frame. For example, if one frame takes 50ms to process, we miss the 33ms target, and the next frame will be processed when the system is ready. This prevents a backlog of frames from building up and crashing the application.
+-   **Resolution is Key**: The most significant factor for achieving real-time performance is the resolution of the video stream being processed. The webcam feed is often processed at a much lower resolution (e.g., 256x256 or 384x384) than a static image to ensure the pipeline can run fast enough.
