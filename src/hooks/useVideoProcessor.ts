@@ -132,7 +132,15 @@ export function useVideoProcessor() {
       const results = await sessionRef.current.run(feeds);
       const newOutputTensor = results[sessionRef.current.outputNames[0]];
 
-      const pixelData = wasmRef.current.postprocess_frame(newOutputTensor.data, modelWidth, modelHeight);
+      const pixelData = wasmRef.current.postprocess_frame(
+        newOutputTensor.data,
+        new Uint8Array(framePixelData),
+        canvas.width, // original width
+        canvas.height, // original height
+        modelWidth,   // stylized width
+        modelHeight,  // stylized height
+        strengthRef.current
+      );
       return new ImageData(new Uint8ClampedArray(pixelData), modelWidth, modelHeight);
     } catch (e) {
       console.error(e);
@@ -142,46 +150,27 @@ export function useVideoProcessor() {
 
   const videoLoop = useCallback(async () => {
     if (videoRef.current && videoRef.current.readyState >= 3 && outputCanvasRef.current) {
-      const outputCtx = outputCanvasRef.current.getContext('2d');
-      const videoElement = videoRef.current;
-      const outputCanvas = outputCanvasRef.current;
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = videoRef.current.videoWidth;
+      tempCanvas.height = videoRef.current.videoHeight;
+      const tempCtx = tempCanvas.getContext('2d');
 
-      if (outputCtx) {
-        // When loading a new model, just show the raw webcam feed.
+      if (tempCtx) {
+        tempCtx.drawImage(videoRef.current, 0, 0, tempCanvas.width, tempCanvas.height);
+
         if (isModelLoading) {
-          outputCtx.drawImage(videoElement, 0, 0, outputCanvas.width, outputCanvas.height);
+          outputCanvasRef.current.getContext('2d')?.drawImage(tempCanvas, 0, 0, outputCanvasRef.current.width, outputCanvasRef.current.height);
         } else {
-          // 1. Create a temporary canvas to get the current frame's pixel data
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = videoElement.videoWidth;
-          tempCanvas.height = videoElement.videoHeight;
-          const tempCtx = tempCanvas.getContext('2d');
-          if (!tempCtx) return;
-          tempCtx.drawImage(videoElement, 0, 0, tempCanvas.width, tempCanvas.height);
-
-          // 2. Run inference to get the stylized frame
-          const stylizedImageData = await runInferenceOnFrame(tempCanvas);
-
-          if (stylizedImageData) {
-            // 3. Draw the original webcam frame to the output canvas
-            outputCtx.globalAlpha = 1.0;
-            outputCtx.drawImage(videoElement, 0, 0, outputCanvas.width, outputCanvas.height);
-
-            // 4. Create another temporary canvas for the stylized image
-            const stylizedCanvas = document.createElement('canvas');
-            stylizedCanvas.width = stylizedImageData.width;
-            stylizedCanvas.height = stylizedImageData.height;
-            stylizedCanvas.getContext('2d')?.putImageData(stylizedImageData, 0, 0);
-
-            // 5. Draw the stylized image on top with alpha for blending
-            outputCtx.globalAlpha = strengthRef.current;
-            outputCtx.drawImage(stylizedCanvas, 0, 0, outputCanvas.width, outputCanvas.height);
-            
-            // 6. Reset alpha
-            outputCtx.globalAlpha = 1.0;
-          } else {
-            // Fallback to drawing the normal video if inference fails
-            outputCtx.drawImage(videoElement, 0, 0, outputCanvas.width, outputCanvas.height);
+          const outputImageData = await runInferenceOnFrame(tempCanvas);
+          if (outputImageData) {
+            const outputCtx = outputCanvasRef.current.getContext('2d');
+            if (outputCtx) {
+              const tempOutCanvas = document.createElement('canvas');
+              tempOutCanvas.width = outputImageData.width;
+              tempOutCanvas.height = outputImageData.height;
+              tempOutCanvas.getContext('2d')?.putImageData(outputImageData, 0, 0);
+              outputCtx.drawImage(tempOutCanvas, 0, 0, outputCanvasRef.current.width, outputCanvasRef.current.height);
+            }
           }
         }
       }
