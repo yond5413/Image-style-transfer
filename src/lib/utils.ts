@@ -11,14 +11,16 @@ export function easeInOutCubic(t: number): number {
 
 export function drawScaledImageDataToCanvas(
   targetCanvas: HTMLCanvasElement,
-  pixelData: Uint8ClampedArray,
+  pixelData: Uint8Array,
   sourceWidth: number,
   sourceHeight: number,
 ) {
   const targetCtx = targetCanvas.getContext('2d');
   if (!targetCtx) return;
 
-  const imageData = new ImageData(pixelData, sourceWidth, sourceHeight);
+  // Create a Uint8ClampedArray from the pixelData to satisfy ImageData constructor
+  const clampedPixelData = new Uint8ClampedArray(pixelData);
+  const imageData = new ImageData(clampedPixelData, sourceWidth, sourceHeight);
   const tempCanvas = document.createElement('canvas');
   tempCanvas.width = sourceWidth;
   tempCanvas.height = sourceHeight;

@@ -151,7 +151,7 @@ export function useImageProcessor() {
       outputCanvas.width = originalCanvasRef.current.width;
       outputCanvas.height = originalCanvasRef.current.height;
 
-      drawScaledImageDataToCanvas(outputCanvas, new Uint8ClampedArray(pixelData), modelWidth, modelHeight);
+      drawScaledImageDataToCanvas(outputCanvas, pixelData, modelWidth, modelHeight);
 
       setStatus("Done!");
     } catch (e) {
