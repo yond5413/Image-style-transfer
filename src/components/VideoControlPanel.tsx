@@ -56,7 +56,17 @@ export function VideoControlPanel({
       </div>
 
       <div className="flex gap-4 mt-4">
-        <button onClick={handleWebcam} className={`p-2 border rounded text-white ${isWebcamOn ? 'bg-red-500' : 'bg-green-500'}`}>{isWebcamOn ? 'Stop Webcam' : 'Start Webcam'}</button>
+        <button 
+          onClick={handleWebcam} 
+          className={`p-2 border rounded text-white ${isWebcamOn ? 'bg-red-500' : 'bg-green-500'}`}
+          aria-pressed={isWebcamOn}
+          aria-label={isWebcamOn ? 'Stop the webcam' : 'Start the webcam'}
+        >
+          {isWebcamOn ? 'Stop Webcam' : 'Start Webcam'}
+        </button>
+      </div>
+      <div className="sr-only" aria-live="polite">
+        {isWebcamOn ? 'Webcam is on' : 'Webcam is off'}
       </div>
     </div>
   );

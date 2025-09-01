@@ -72,9 +72,7 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
   const createSession = useCallback(async (modelId: string) => {
     let currentSession = sessionCache[modelId];
     if (currentSession) {
-      if (session !== currentSession) {
-        setSession(currentSession);
-      }
+      if (session !== currentSession) setSession(currentSession);
       return currentSession;
     }
 
@@ -87,11 +85,43 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
     }
 
     setStatus(`Loading ${modelData.name} model...`);
-    try {
-      const modelFile = modelData.file;
-      ort.env.wasm.wasmPaths = '/';
-      currentSession = await InferenceSession.create(modelFile, { executionProviders: onnxExecutionProviders });
+    const modelFile = modelData.file;
+    ort.env.wasm.wasmPaths = '/';
+    
+    let sessionToCreate: InferenceSession | null = null;
+    const providersToTry = onnxExecutionProviders;
 
+    for (const provider of providersToTry) {
+        try {
+            setStatus(`Loading model with ${provider}...`);
+            sessionToCreate = await InferenceSession.create(modelFile, { executionProviders: [provider] });
+            console.log(`Successfully created session with ${provider}`);
+            // Update providers to only use the successful one from now on
+            if (onnxExecutionProviders.length > 1) {
+              setOnnxExecutionProviders([provider]);
+            }
+            break; // Exit loop on success
+        } catch (e) {
+            console.warn(`Could not create session with ${provider}:`, e);
+            if (providersToTry.indexOf(provider) === providersToTry.length - 1) {
+                // This was the last provider to try
+                setStatus("Failed to load model. Your browser might not be supported.");
+                setIsModelLoading(false);
+                return null;
+            }
+            setStatus(`Failed with ${provider}, trying next...`);
+        }
+    }
+
+    if (!sessionToCreate) {
+        setStatus("Failed to load model.");
+        setIsModelLoading(false);
+        return null;
+    }
+    
+    currentSession = sessionToCreate;
+    
+    try {
       setStatus(`Warming up ${modelData.name} model...`);
       const modelShape = modelData.input.shape;
       const dummyInput = new Tensor('float32', new Float32Array(modelShape[1] * modelShape[2] * modelShape[3]), modelShape);
@@ -99,18 +129,18 @@ export function useModelRunner(originalCanvasRef: React.RefObject<HTMLCanvasElem
       const feeds = { [inputName]: dummyInput };
       await currentSession.run(feeds);
 
-      setSessionCache(prev => ({ ...prev, [modelId]: currentSession }));
+      setSessionCache(prev => ({ ...prev, [modelId]: currentSession! }));
       setSession(currentSession);
       setStatus(`Model ${modelData.name} loaded`);
     } catch (e) {
-      console.error("Failed to create session", e);
-      setStatus("Failed to load model.");
+      console.error("Failed to warm up the model", e);
+      setStatus("Failed to initialize the model.");
     } finally {
       setIsModelLoading(false);
     }
 
     return currentSession;
-  }, [models, session, sessionCache, setSession, setSessionCache, setStatus, onnxExecutionProviders]);
+  }, [models, session, sessionCache, onnxExecutionProviders, setOnnxExecutionProviders, setSession, setIsModelLoading, setStatus]);
 
   useEffect(() => {
     if (selectedModelId) {

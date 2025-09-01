@@ -180,20 +180,6 @@ export function useVideoProcessor() {
 
   // --- Event Handlers ---
 
-  const startWebcam = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        setIsVideoRunning(true);
-        requestRef.current = requestAnimationFrame(videoLoop);
-      }
-    } catch (err) {
-      console.error("Error accessing webcam: ", err);
-    }
-  }, [videoLoop]);
-
   const stopWebcam = useCallback(() => {
     if (requestRef.current) cancelAnimationFrame(requestRef.current);
     setIsVideoRunning(false);
@@ -203,6 +189,30 @@ export function useVideoProcessor() {
       videoRef.current.srcObject = null;
     }
   }, []);
+
+  const startWebcam = useCallback(async () => {
+    if (isVideoRunning) return;
+    // Optimistically set running state to prevent race conditions
+    setIsVideoRunning(true);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) {
+        // Ensure any previous stream is stopped before assigning a new one.
+        if (videoRef.current.srcObject) {
+          const oldStream = videoRef.current.srcObject as MediaStream;
+          oldStream.getTracks().forEach(track => track.stop());
+        }
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        requestRef.current = requestAnimationFrame(videoLoop);
+      } 
+    } catch (err) {
+      console.error("Error accessing webcam: ", err);
+      // If there's an error, revert the state and stop everything.
+      stopWebcam();
+    }
+  }, [videoLoop, isVideoRunning, stopWebcam]);
 
   const handleStyleChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedModelId(event.target.value);

@@ -39,7 +39,7 @@ export function ImageControlPanel({
           <label htmlFor="file-upload" className="cursor-pointer p-2 border rounded bg-blue-500 text-white text-center truncate">
             {fileName || "Select Image"}
           </label>
-          <input id="file-upload" type="file" onChange={handleImageUpload} className="hidden" />
+          <input id="file-upload" type="file" onChange={handleImageUpload} className="hidden" accept="image/png,image/jpeg" />
         </div>
         <div className="flex flex-col">
           {models.length > 0 && selectedModelId && (

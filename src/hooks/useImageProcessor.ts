@@ -1,6 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { InferenceSession, Tensor } from 'onnxruntime-web';
 import * as ort from 'onnxruntime-web';
+import { drawScaledImageDataToCanvas } from '../lib/utils';
+
+const ALLOWED_FILE_TYPES = ['image/png', 'image/jpeg'];
+const MAX_FILE_SIZE_MB = 10;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 // Define shared types for the model manifest
 interface ModelManifestEntry {
@@ -28,6 +33,8 @@ export function useImageProcessor() {
   // State for model and inference
   const [session, setSession] = useState<InferenceSession | null>(null);
   const [sessionCache, setSessionCache] = useState<Record<string, InferenceSession>>({});
+  const sessionCacheRef = useRef(sessionCache);
+  sessionCacheRef.current = sessionCache;
   const [status, setStatus] = useState("Loading WebAssembly...");
   const [models, setModels] = useState<ModelManifestEntry[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
@@ -45,25 +52,59 @@ export function useImageProcessor() {
       setOnnxExecutionProviders(['webgl', 'wasm']);
     }
 
-    async function loadWasmAndModels() {
+    async function loadWasm() {
       try {
+        setStatus("Loading WebAssembly module...");
         const wasm = await import("../wasm/pkg");
         await wasm.default();
         wasmRef.current = wasm;
-        setStatus("Select a style and image to start.");
+        return true;
+      } catch (e) {
+        console.error("Failed to load WASM module:", e);
+        setStatus("Error: Failed to load WebAssembly module. Please refresh.");
+        return false;
+      }
+    }
 
+    async function loadModelManifest() {
+      try {
+        setStatus("Loading available styles...");
         const manifestResponse = await fetch('/models/manifest.json');
+        if (!manifestResponse.ok) {
+          throw new Error(`Failed to fetch manifest: ${manifestResponse.statusText}`);
+        }
         const manifest: ModelManifest = await manifestResponse.json();
         setModels(manifest.models);
         if (manifest.models.length > 0) {
           setSelectedModelId(manifest.models[0].id);
+          setStatus("Select a style and image to start.");
+        } else {
+          setStatus("No models found in manifest.");
         }
       } catch (e) {
-        console.error(e);
-        setStatus("Failed to load session.");
+        console.error("Failed to load model manifest:", e);
+        setStatus("Error: Could not load model list. Please check your connection.");
       }
     }
-    loadWasmAndModels();
+
+    async function initialize() {
+      if (await loadWasm()) {
+        await loadModelManifest();
+      }
+    }
+
+    initialize();
+  }, []);
+
+  useEffect(() => {
+    // Release all ONNX sessions when the component unmounts to prevent memory leaks.
+    return () => {
+      Object.values(sessionCacheRef.current).forEach(session => {
+        if (session) {
+          session.release().catch(e => console.error("Error releasing session:", e));
+        }
+      });
+    };
   }, []);
 
   const runInference = useCallback(async (imageBytes: ArrayBuffer, modelId: string) => {
@@ -109,15 +150,8 @@ export function useImageProcessor() {
       if (!outputCanvas || !originalCanvasRef.current) return;
       outputCanvas.width = originalCanvasRef.current.width;
       outputCanvas.height = originalCanvasRef.current.height;
-      const outputCtx = outputCanvas.getContext('2d');
-      if (!outputCtx) return;
 
-      const imageData = new ImageData(new Uint8ClampedArray(pixelData), modelWidth, modelHeight);
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = modelWidth;
-      tempCanvas.height = modelHeight;
-      tempCanvas.getContext('2d')?.putImageData(imageData, 0, 0);
-      outputCtx.drawImage(tempCanvas, 0, 0, outputCanvas.width, outputCanvas.height);
+      drawScaledImageDataToCanvas(outputCanvas, new Uint8ClampedArray(pixelData), modelWidth, modelHeight);
 
       setStatus("Done!");
     } catch (e) {
@@ -137,6 +171,17 @@ export function useImageProcessor() {
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+      setStatus(`Error: Invalid file type. Please upload a PNG or JPEG image.`);
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setStatus(`Error: File is too large. Please upload an image smaller than ${MAX_FILE_SIZE_MB}MB.`);
+      return;
+    }
+
     setFileName(file.name);
 
     const reader = new FileReader();
@@ -195,6 +240,7 @@ export function useImageProcessor() {
 
   return {
     status,
+    setStatus,
     models,
     selectedModelId,
     styleStrength,

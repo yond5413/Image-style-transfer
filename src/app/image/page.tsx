@@ -9,6 +9,7 @@ const DISPLAY_RESOLUTION = 480;
 export default function ImagePage() {
   const {
     status,
+    setStatus,
     models,
     selectedModelId,
     styleStrength,
@@ -25,10 +26,15 @@ export default function ImagePage() {
   const handleDownload = () => {
     const canvas = outputCanvasRef.current;
     if (!canvas) return;
-    const link = document.createElement('a');
-    link.download = 'stylized-image.png';
-    link.href = canvas.toDataURL('image/png');
-    link.click();
+    try {
+      const link = document.createElement('a');
+      link.download = 'stylized-image.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } catch (e) {
+      console.error("Failed to download image:", e);
+      setStatus("Error: Failed to download image.");
+    }
   };
 
   return (

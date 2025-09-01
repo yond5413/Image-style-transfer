@@ -4,9 +4,11 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ImageError {
-    #[error("Failed to decode image")]
+    #[error("Failed to decode image: {0}")]
     Decode(#[from] image::ImageError),
-    #[error("Image processing failed: {0}")]
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
+    #[error("Internal processing error: {0}")]
     Processing(String),
 }
 
@@ -156,20 +158,30 @@ pub fn postprocess_video_frame(
     Ok(output_img.into_raw())
 }
 
-fn tensor_to_image(
+pub fn tensor_to_image(
     tensor: Vec<f32>,
     width: u32,
     height: u32,
 ) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, ImageError> {
+    let expected_len = (3 * width * height) as usize;
+    if tensor.len() != expected_len {
+        return Err(ImageError::InvalidArgument(format!(
+            "Invalid tensor length. Expected {}, got {}",
+            expected_len,
+            tensor.len()
+        )));
+    }
+
     let mut img_buf = ImageBuffer::new(width, height);
 
     for y in 0..height {
         for x in 0..width {
-            let r = (tensor[(y * width + x) as usize]).max(0.0).min(255.0) as u8;
-            let g = (tensor[((height * width) + y * width + x) as usize])
+            // Denormalize from [0, 1] to [0, 255] and clamp to ensure validity
+            let r = (tensor[(y * width + x) as usize] * 255.0).max(0.0).min(255.0) as u8;
+            let g = (tensor[((height * width) + y * width + x) as usize] * 255.0)
                 .max(0.0)
                 .min(255.0) as u8;
-            let b = (tensor[((2 * height * width) + y * width + x) as usize])
+            let b = (tensor[((2 * height * width) + y * width + x) as usize] * 255.0)
                 .max(0.0)
                 .min(255.0) as u8;
             img_buf.put_pixel(x, y, Rgba([r, g, b, 255]));

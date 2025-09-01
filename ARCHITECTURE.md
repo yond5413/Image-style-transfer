@@ -34,13 +34,15 @@ This is the most critical hook in the system. It acts as the central coordinator
 
 -   **Dynamic WASM Loading**: The Rust/WASM module is loaded dynamically using `import()`.
     -   **Why?** This prevents the ~1MB WASM binary from blocking the main thread during initial page load, improving the Time to Interactive (TTI).
--   **Execution Provider Selection**: It detects WebGPU support and configures ONNX Runtime accordingly.
-    -   **Why?** WebGPU is significantly faster for this type of computation. Providing a WebGL fallback broadens device compatibility.
+-   **Execution Provider Selection**: It detects WebGPU support and configures ONNX Runtime accordingly. It also includes robust fallback logic to WebGL/WASM if the preferred provider is not available or fails to initialize.
+    -   **Why?** WebGPU is significantly faster for this type of computation. Providing a WebGL fallback broadens device compatibility. The explicit fallback mechanism ensures a smoother user experience even on devices with partial or inconsistent WebGPU support.
+
 -   **Two-Level Model Caching**:
     1.  **In-Memory Session Cache (`sessionCache`)**: `InferenceSession` objects are stored in a simple JavaScript object.
         -   **Why?** Re-creating an inference session is expensive as it involves compiling the model shaders. Caching the session object in memory makes switching between recently used styles nearly instantaneous.
     2.  **Browser `CacheStorage`**: ONNX Runtime Web automatically uses the browser's native `CacheStorage` API to store the `.onnx` model files.
         -   **Why?** This enables offline use and avoids re-downloading model files on subsequent visits, saving bandwidth and improving load times.
+
 -   **Inference Orchestration (`runInferenceOnImage`)**: This function sequences the entire style transfer process.
     -   **Design**: It's an `async` function that calls out to the WASM module for pre/post-processing and to ONNX Runtime for inference. This clear, sequential flow makes the process easy to debug and reason about.
 
@@ -68,7 +70,20 @@ This hook encapsulates the complex logic of managing the webcam stream and the r
 
 ---
 
-## 4. Backend Architecture (`/rust`)
+## 5. Offline Support & Caching (Service Worker)
+
+The application is designed as a Progressive Web App (PWA) with robust offline capabilities, managed by a Service Worker (`public/sw.js`).
+
+-   **Installation & Precaching**: On the first visit, the Service Worker is installed and precaches essential application shell files (HTML, CSS, core JavaScript). This ensures that the basic UI is available instantly on subsequent visits, even offline.
+-   **Runtime Caching - ONNX Models**: ONNX model files (`.onnx`) are cached using a `Cache-First` strategy. Once a model is downloaded, it's stored in a dedicated cache (`onnx-models`) and served directly from there on subsequent requests, significantly speeding up model loading and enabling offline inference.
+-   **Runtime Caching - Other Assets**: For other dynamic assets (e.g., Next.js generated JavaScript bundles, WASM binaries, images), a `Network-First` strategy is employed. This attempts to fetch from the network first to ensure up-to-date content, falling back to the cache if the network is unavailable. This balances freshness with offline availability.
+-   **Cache Management**: The Service Worker includes an `activate` event listener to clean up old caches, ensuring that only the latest version of the application's assets are stored, preventing stale content and managing storage efficiently.
+
+This comprehensive caching strategy contributes to a fast, reliable, and offline-capable user experience.
+
+---
+
+## 6. Backend Architecture (`/rust`)
 
 The Rust code is compiled to WebAssembly and serves as a high-performance "kernel" for image processing tasks that are inefficient to perform in JavaScript.
 

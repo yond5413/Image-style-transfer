@@ -61,6 +61,15 @@ The application is composed of three main parts:
     npm run dev
     ```
 
+## How to Run Tests
+
+To run the Rust tests, use the following command from the project root:
+```bash
+cargo test --manifest-path rust/Cargo.toml
+```
+
+There are currently no frontend tests configured for this project.
+
 ## Technology Stack
 
 -   **Frontend:** React, Next.js, TypeScript, Tailwind CSS

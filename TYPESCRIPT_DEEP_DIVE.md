@@ -142,6 +142,10 @@ const runInferenceOnImage = useCallback(async (imageBytes: ArrayBuffer) => {
 
 Currently, errors within the pipeline are caught by a `try...catch` block and logged to the console.
 
+### Error Handling
+
+Errors within the pipeline are caught by `try...catch` blocks and logged to the console, with user-friendly status messages displayed in the UI.
+
 ```typescript
 try {
   // ... inference pipeline ...
@@ -152,6 +156,145 @@ try {
   } // ...
 }
 ```
+
+**Execution Provider Fallback**: The `createSession` function now includes robust fallback logic for ONNX Runtime execution providers. It attempts to create a session with the preferred providers (e.g., `webgpu`), and if that fails, it gracefully falls back to alternative providers (e.g., `wasm`). Clear status messages are provided to the user during this process, ensuring transparency and a smoother experience even on devices with partial or inconsistent WebGPU support.
+
+---
+
+## 5. UI Component Accessibility and Input Validation
+
+Significant improvements have been made to the application's accessibility and input validation to enhance user experience and robustness.
+
+-   **Semantic HTML and ARIA Attributes**: UI components now utilize more semantic HTML elements and appropriate ARIA attributes to improve screen reader compatibility and overall navigability.
+    -   **`CanvasDisplay.tsx`**: Headings have been updated to `<h2>` for better document structure. Canvases now include `aria-label` attributes for descriptive context. Status updates (e.g., "Loading model...") are announced to screen readers using an `aria-live="polite"` region.
+    -   **`VideoControlPanel.tsx`**: The "Start Webcam" / "Stop Webcam" button now includes `aria-pressed` to indicate its toggle state and a descriptive `aria-label`. A visually hidden `aria-live="polite"` region announces webcam state changes (e.g., "Webcam is on", "Webcam is off") to assistive technologies.
+
+-   **Input Validation**: User input fields now include validation to prevent common errors and improve data integrity.
+    -   **`ImageControlPanel.tsx`**: The file input for image uploads now specifies `accept="image/png,image/jpeg"` to guide users towards valid file types in the upload dialog. Additionally, the `useImageProcessor` hook now performs server-side validation for file type and size, providing immediate user feedback for invalid or excessively large uploads.
+
+These enhancements contribute to a more inclusive, user-friendly, and resilient application.
+
+---
+
+## 4. `useWebcam.ts`: Encapsulating Real-time Video Logic
+
+Processing a real-time video stream is fundamentally different from processing a single image. To handle this complexity cleanly, all video-related logic is encapsulated in the `useWebcam.ts` hook.
+
+### Design Rationale
+
+Previously, the video processing loop and webcam state were managed directly within the `video/page.tsx` component using multiple `useEffect` hooks. This led to several problems:
+-   **Complex State Management**: `isVideoRunning`, the `MediaStream` object, and the `requestAnimationFrame` ID were all managed separately.
+-   **Resource Leaks**: It was difficult to ensure that the camera stream and the animation loop were always cleaned up correctly.
+-   **Poor Separation of Concerns**: The main page component was cluttered with low-level video processing logic.
+
+The `useWebcam` hook solves these problems by creating a single, self-contained unit for all video functionality.
+
+### How It Works
+
+The hook is instantiated in `video/page.tsx` like this:
+
+```typescript
+const {
+  isVideoRunning,
+  videoRef,
+  startWebcam,
+  stopWebcam,
+} = useWebcam(model.runInferenceOnFrame, outputCanvasRef);
+```
+
+-   **Arguments**: It takes two arguments:
+    1.  `runInference`: A callback function that will be executed on each video frame. In our case, we pass `model.runInferenceOnFrame` from the `useModelRunner` hook.
+    2.  `outputCanvasRef`: A ref to the canvas where the final stylized video should be drawn.
+-   **Return Values**: It returns an object containing:
+    -   `isVideoRunning`: A boolean state variable indicating if the webcam is active.
+    -   `videoRef`: A ref to be attached to the `<video>` element.
+    -   `startWebcam`: A function to start the webcam.
+    -   `stopWebcam`: A function to gracefully stop the webcam and clean up all resources.
+
+### The Video Loop: `videoLoop`
+
+The core of the hook is the `videoLoop` function, which is powered by `requestAnimationFrame`.
+
+```typescript
+const videoLoop = useCallback(async () => {
+  if (videoRef.current && videoRef.current.readyState >= 3 && outputCanvasRef.current) {
+    // 1. Draw current video frame to a temporary canvas
+    // ...
+    
+    // 2. Run inference on the temporary canvas
+    const outputImageData = await runInference(tempCanvas);
+    
+    // 3. Draw the stylized result to the output canvas
+    if (outputImageData) {
+      // ... drawing logic ...
+    }
+  }
+  // 4. Schedule the next frame
+  requestRef.current = requestAnimationFrame(videoLoop);
+}, [runInference, outputCanvasRef]);
+```
+
+This loop continuously:
+1.  Captures the current frame from the `<video>` element.
+2.  Calls the `runInference` function that was passed in as an argument.
+3.  Draws the resulting `ImageData` to the output canvas.
+4.  Schedules itself to be called again on the next animation frame.
+
+### Graceful Shutdown: `stopWebcam`
+
+The `stopWebcam` function is critical for preventing resource leaks.
+
+```typescript
+const stopWebcam = useCallback(() => {
+  // 1. Stop the animation loop
+  if (requestRef.current) {
+    cancelAnimationFrame(requestRef.current);
+  }
+  
+  // 2. Update the state
+  setIsVideoRunning(false);
+  
+  // 3. Stop the camera hardware track
+  if (videoRef.current && videoRef.current.srcObject) {
+    const stream = videoRef.current.srcObject as MediaStream;
+    stream.getTracks().forEach(track => track.stop());
+    videoRef.current.srcObject = null;
+  }
+}, []);
+```
+This function ensures that both the animation loop is cancelled and, most importantly, the browser is instructed to release the camera hardware (`track.stop()`). This turns off the camera light and frees up the device for other applications.
+
+### Solving Stale Closures with `useRef`
+
+A critical challenge in the `useWebcam` hook is ensuring the `videoLoop` always calls the *latest* version of the `runInference` function. When the user selects a new model, the `useModelRunner` hook creates a new `runInferenceOnFrame` function with the new model's session in its closure.
+
+**The Problem:** The `videoLoop` is wrapped in a `useCallback` for performance. If we include `runInference` in its dependency array, the loop itself gets recreated frequently, which is not ideal. However, if we *don't* include it, the `videoLoop` holds a "stale" reference to the very first `runInference` function it received, and it never gets the new one when the model changes.
+
+**The Solution:** We use a `useRef` to act as a stable "box" for the `runInference` function.
+
+```typescript
+// In useWebcam.ts
+
+// ...
+const runInferenceRef = useRef(runInference);
+
+useEffect(() => {
+  runInferenceRef.current = runInference;
+}, [runInference]);
+
+const videoLoop = useCallback(async () => {
+  // ...
+  const outputImageData = await runInferenceRef.current(tempCanvas);
+  // ...
+}, [outputCanvasRef, isModelLoading]); // Note: runInference is NOT in the dependency array
+```
+
+1.  **`runInferenceRef`**: A `ref` is created to hold the `runInference` function.
+2.  **`useEffect`**: This effect runs whenever the `runInference` prop changes (i.e., when a new model is loaded). It updates the `.current` property of the ref to point to the latest function.
+3.  **`videoLoop`**: The loop itself is now only created once (its dependencies rarely change). On every frame, it calls `runInferenceRef.current()`. This ensures it always executes the most up-to-date version of the inference function, correctly applying the newly selected model's style without needing to restart the webcam.
+
+This pattern is a standard and highly effective way to handle callbacks that change over time within a long-running `useCallback` or `useEffect` hook.
+
 
 **Future Improvement**: A more robust solution would involve a dedicated error state (e.g., `const [error, setError] = useState<string | null>(null);`) and displaying a user-friendly toast notification or message in the UI when an error occurs.
 

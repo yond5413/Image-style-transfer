@@ -1,8 +1,8 @@
 pub mod image_ops;
 
 use wasm_bindgen::prelude::*;
-use image_ops::{preprocess_image, postprocess_image, postprocess_video_frame, preprocess_frame as preprocess_frame_rust};
-use js_sys::{Float32Array, Uint8Array};
+use image_ops::{preprocess_image, postprocess_image, postprocess_video_frame, preprocess_frame as preprocess_frame_rust, ImageError};
+use js_sys::{Float32Array, Uint8Array, Error, Reflect};
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -10,17 +10,30 @@ use js_sys::{Float32Array, Uint8Array};
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
+impl From<ImageError> for JsValue {
+    fn from(err: ImageError) -> Self {
+        let (name, message) = match err {
+            ImageError::Decode(e) => ("ImageDecodeError", e.to_string()),
+            ImageError::InvalidArgument(msg) => ("InvalidArgumentError", msg),
+            ImageError::Processing(msg) => ("ImageProcessingError", msg),
+        };
+        let js_error = Error::new(&message);
+        Reflect::set(&js_error, &"name".into(), &name.into()).unwrap();
+        js_error.into()
+    }
+}
+
 #[wasm_bindgen]
 pub fn preprocess(image_bytes: &[u8], target_width: u32, target_height: u32) -> Result<Float32Array, JsValue> {
     console_error_panic_hook::set_once();
-    let tensor = preprocess_image(image_bytes, target_width, target_height).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let tensor = preprocess_image(image_bytes, target_width, target_height).map_err(Into::<JsValue>::into)?;
     Ok(Float32Array::from(tensor.as_slice()))
 }
 
 #[wasm_bindgen]
 pub fn preprocess_frame(frame_pixels: &[u8], frame_width: u32, frame_height: u32, target_width: u32, target_height: u32) -> Result<Float32Array, JsValue> {
     console_error_panic_hook::set_once();
-    let tensor = preprocess_frame_rust(frame_pixels, frame_width, frame_height, target_width, target_height).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let tensor = preprocess_frame_rust(frame_pixels, frame_width, frame_height, target_width, target_height).map_err(Into::<JsValue>::into)?;
     Ok(Float32Array::from(tensor.as_slice()))
 }
 
@@ -28,7 +41,7 @@ pub fn preprocess_frame(frame_pixels: &[u8], frame_width: u32, frame_height: u32
 pub fn postprocess(output_tensor: Float32Array, original_image_bytes: &[u8], width: u32, height: u32, strength: f32) -> Result<Uint8Array, JsValue> {
     console_error_panic_hook::set_once();
     let output_vec = output_tensor.to_vec();
-    let result_rgba = postprocess_image(output_vec, original_image_bytes, width, height, strength).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let result_rgba = postprocess_image(output_vec, original_image_bytes, width, height, strength).map_err(Into::<JsValue>::into)?;
     Ok(Uint8Array::from(result_rgba.as_slice()))
 }
 
@@ -52,7 +65,7 @@ pub fn postprocess_frame(
         stylized_width,
         stylized_height,
         strength
-    ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    ).map_err(Into::<JsValue>::into)?;
     Ok(Uint8Array::from(result_rgba.as_slice()))
 }
 
